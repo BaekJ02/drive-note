@@ -74,9 +74,8 @@ private val Line = Color(0xFFE2E5EA)
 private val Accent = Color(0xFF1A73E8)
 private val Danger = Color(0xFFD9443B)
 private val Positive = Color(0xFF2E9E5B)
-private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경, 파란 배지 배경
-private val DangerBg = Color(0xFFFCE8E6)   // 연한 빨강 배지 배경
-private val NeutralBg = Color(0xFFF1F3F4)  // 회색 배지 배경
+private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경
+private val DividerGray = Color(0xFFD0D4D9) // 텍스트 구분자 "|"
 private val IconGray = Color(0xFF3C4149)   // 흰 원형 버튼 아이콘
 private val ChartBg = Color(0xFFF6F7F9)    // 비교 그래프 배경
 private val RecommendGray = Color(0xFF8A9099) // 비교 그래프 '권장' 선
@@ -271,10 +270,10 @@ private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport
             // 원형 버튼 2개: 오른쪽 끝을 '리포트 보기' 버튼 오른쪽 끝에 맞추고, 바 위로 16dp
             Column(
                 Modifier.align(Alignment.BottomEnd)
-                    .padding(end = HOME_BAR_MARGIN + HOME_BAR_END_PAD, bottom = barInset + 16.dp),
+                    .padding(end = MAP_BUTTON_END, bottom = barInset + 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                RoundIconButton(
+                MapCircleButton(
                     if (voiceOn) R.drawable.ic_volume_up else R.drawable.ic_volume_off,
                     if (voiceOn) "음성 코칭 끄기" else "음성 코칭 켜기",
                     bg = if (voiceOn) Accent else Color.White, tint = if (voiceOn) Color.White else IconGray,
@@ -282,11 +281,11 @@ private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport
                     setVoice(!voiceOn)
                     toast(if (!voiceOn) "주행 중 음성 코칭을 켰어요" else "주행 중 음성 코칭을 껐어요")
                 }
-                RoundIconButton(R.drawable.ic_share, "주행 리포트 공유", bg = Color.White, tint = IconGray) { showShare = true }
+                MapCircleButton(R.drawable.ic_share, "주행 리포트 공유", bg = Color.White, tint = IconGray) { showShare = true }
             }
             // 오른쪽 위 '개선할 점': 접히면 깃발 버튼, 펼치면 목록 카드 (오른쪽 위 모서리 고정)
             IssuesPanel(issuesOpen, onToggle = { issuesOpen = !issuesOpen }, onItem = { issuesOpen = false; openReport() },
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 20.dp - PANEL_SHADOW_PAD, end = 20.dp - PANEL_SHADOW_PAD))
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 20.dp - PANEL_SHADOW_PAD, end = MAP_BUTTON_END - PANEL_SHADOW_PAD))
             // 스낵바: 지도 하단, 떠 있는 바 바로 위 가운데
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = barInset + 8.dp))
         }
@@ -316,7 +315,7 @@ private fun IssuesPanel(open: Boolean, onToggle: () -> Unit, onItem: () -> Unit,
         if (!expanded) {
             // 배지가 버튼 오른쪽 위에 살짝 걸치도록 바깥 여백을 두고 겹침
             Box(Modifier.padding(PANEL_SHADOW_PAD)) {
-                RoundIconButton(R.drawable.ic_flag, "개선할 점 ${total}건 펼치기", bg = Color.White, tint = IconGray, onClick = onToggle)
+                MapCircleButton(R.drawable.ic_flag, "개선할 점 ${total}건 펼치기", bg = Color.White, tint = IconGray, onClick = onToggle)
                 CountBadge(total, Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-8).dp))
             }
         } else {
@@ -368,7 +367,7 @@ private fun CountBadge(n: Int, modifier: Modifier = Modifier) {
 
 /** 지도 위 원형 아이콘 버튼 (지름 56dp, 옅은 그림자, 아이콘만) */
 @Composable
-private fun RoundIconButton(icon: Int, description: String, bg: Color, tint: Color, onClick: () -> Unit) {
+private fun MapCircleButton(icon: Int, description: String, bg: Color, tint: Color, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = CircleShape, color = bg, shadowElevation = 4.dp, modifier = Modifier.size(56.dp)) {
         Box(contentAlignment = Alignment.Center) {
             Icon(painterResource(icon), contentDescription = description, tint = tint, modifier = Modifier.size(26.dp))
@@ -389,7 +388,7 @@ private fun ShareDialog(onDismiss: () -> Unit, onCopy: () -> Unit) {
                 MockData.shareTargets.forEach { (name, role) ->
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("$name · $role", fontSize = BODY, color = Ink, modifier = Modifier.weight(1f))
-                        Pill("열람 중", NeutralBg, Sub, Modifier.padding(start = 24.dp))
+                        Text("열람 중", fontSize = 24.sp, color = Sub, modifier = Modifier.padding(start = 24.dp))
                     }
                 }
             }
@@ -410,6 +409,8 @@ private fun ShareDialog(onDismiss: () -> Unit, onCopy: () -> Unit) {
 
 private val HOME_BAR_HEIGHT = 108.dp
 private val HOME_BAR_END_PAD = 20.dp // 바 안쪽 오른쪽 여백 ('리포트 보기' 버튼 오른쪽 끝 위치)
+// 지도 위 원형 버튼(깃발·음성·공유) 공통 오른쪽 여백 = '리포트 보기' 버튼 오른쪽 끝 → 세 버튼 가로 중심 일치
+private val MAP_BUTTON_END get() = HOME_BAR_MARGIN + HOME_BAR_END_PAD
 private val HOME_BAR_MARGIN = 24.dp
 private val HOME_BAR_SHAPE = RoundedCornerShape(28.dp)
 
@@ -862,7 +863,7 @@ private fun TrendScreen(focus: List<Int>) {
     }
 }
 
-/** 개선 추이 카드 왼쪽: 분류(+집중 항목) / 항목 이름 / 이번 주 횟수 + 4주 전 대비 배지 */
+/** 개선 추이 카드 왼쪽: 분류(| 집중 항목) / 항목 이름 / 이번 주 횟수 + 4주 전 대비 문장 */
 @Composable
 private fun TrendInfo(h: Habit, focused: Boolean, modifier: Modifier) {
     Column(modifier) {
@@ -871,30 +872,35 @@ private fun TrendInfo(h: Habit, focused: Boolean, modifier: Modifier) {
             Text(h.category.label, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = h.category.color,
                 modifier = Modifier.padding(start = 10.dp))
             if (focused) {
-                Pill("집중 항목", SelectedBg, Accent, Modifier.padding(start = 14.dp))
+                Text("|", fontSize = 22.sp, color = DividerGray, modifier = Modifier.padding(horizontal = 14.dp))
+                Icon(painterResource(R.drawable.ic_flag), null, tint = IconGray, modifier = Modifier.size(16.dp))
+                Text("집중 항목", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = IconGray, modifier = Modifier.padding(start = 6.dp))
             }
         }
         Text(h.name, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 14.dp))
         val first = h.weekly.first()
         val last = h.weekly.last()
-        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("이번 주", fontSize = 22.sp, color = Sub)
-            Text("${last}회", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 12.dp))
-            val (text, bg, fg) = when {
-                last < first -> Triple("4주 전보다 ${first - last}회 ↓", SelectedBg, Accent)
-                last > first -> Triple("4주 전보다 ${last - first}회 ↑", DangerBg, Danger)
-                else -> Triple("4주 전과 같아요", NeutralBg, Sub)
+        // "이번 주 7회" 와 변화 문장을 같은 글자 기준선에 맞춤
+        Row(Modifier.padding(top = 14.dp)) {
+            Text("이번 주", fontSize = 22.sp, color = Sub, modifier = Modifier.alignByBaseline())
+            Text("${last}회", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = Ink,
+                modifier = Modifier.alignByBaseline().padding(start = 12.dp))
+            val change = buildAnnotatedString {
+                when {
+                    last < first -> {
+                        append("4주 전보다 ")
+                        withStyle(SpanStyle(color = Accent, fontWeight = FontWeight.Bold)) { append("${first - last}회 줄었어요") }
+                    }
+                    last > first -> {
+                        append("4주 전보다 ")
+                        withStyle(SpanStyle(color = Danger, fontWeight = FontWeight.Bold)) { append("${last - first}회 늘었어요") }
+                    }
+                    else -> append("4주 전과 같아요")
+                }
             }
-            Pill(text, bg, fg, Modifier.padding(start = 16.dp))
+            Text(change, fontSize = 24.sp, color = Sub, modifier = Modifier.alignByBaseline().padding(start = 16.dp))
         }
     }
-}
-
-/** 테두리 없는 둥근 배지 */
-@Composable
-private fun Pill(text: String, bg: Color, fg: Color, modifier: Modifier = Modifier) {
-    Text(text, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = fg,
-        modifier = modifier.clip(RoundedCornerShape(10.dp)).background(bg).padding(horizontal = 12.dp, vertical = 4.dp))
 }
 
 /**
