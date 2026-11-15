@@ -31,8 +31,53 @@ data class DriveSummary(
 
 data class WeekStat(val label: String, val value: String)
 
+/** 위도·경도 (지도 라이브러리와 무관한 목업용 좌표) */
+data class GeoPt(val lat: Double, val lon: Double)
+
+/** 경로 중 습관이 감지된 구간: route[from]..route[to], 색·이름은 habitId의 습관에서 가져옴 */
+data class RouteSegment(val from: Int, val to: Int, val habitId: Int)
+
 object MockData {
-    val lastDrive = DriveSummary("11월 15일 (일) 08:42", "집 → 회사", 34, 18.6)
+    val userName = "지민"
+
+    val lastDrive = DriveSummary("11월 15일 (일) 08:42", "집 → 회사", 34, 14.8)
+    val lastDriveArrive = "09:16"
+    val lastDriveFrom = "성남 수정구 시흥동"
+    val lastDriveTo = "강남구 삼성동"
+
+    // 최근 주행 경로: 시흥동 → 대왕판교로 → 헌릉로 → 분당수서로 → 삼성동
+    // (OpenStreetMap 도로 데이터 기반 경로를 22개 점으로 단순화한 가상 경로)
+    val lastDriveRoute = listOf(
+        GeoPt(37.41933, 127.10171), // 0 출발 (시흥동)
+        GeoPt(37.41960, 127.10233),
+        GeoPt(37.42936, 127.10189),
+        GeoPt(37.43275, 127.10315),
+        GeoPt(37.43704, 127.10381),
+        GeoPt(37.44442, 127.10366), // 5
+        GeoPt(37.45187, 127.10628),
+        GeoPt(37.46467, 127.10827),
+        GeoPt(37.46594, 127.11729), // 8 헌릉로
+        GeoPt(37.47090, 127.12682),
+        GeoPt(37.47003, 127.12465), // 10
+        GeoPt(37.47041, 127.12373), // 11 분당수서로 진입
+        GeoPt(37.48158, 127.11536),
+        GeoPt(37.48253, 127.11401),
+        GeoPt(37.48394, 127.11016),
+        GeoPt(37.49106, 127.10397), // 15
+        GeoPt(37.49451, 127.09646),
+        GeoPt(37.50017, 127.07973),
+        GeoPt(37.50223, 127.07116),
+        GeoPt(37.50648, 127.06802),
+        GeoPt(37.51013, 127.06736), // 20
+        GeoPt(37.50880, 127.06315), // 21 도착 (삼성동)
+    )
+
+    // 습관이 감지된 구간 (홈 지도에 분류 색으로 강조)
+    val lastDriveSegments = listOf(
+        RouteSegment(1, 3, habitId = 1),   // 급출발·급가속: 시흥동 교차로 출발 직후
+        RouteSegment(12, 15, habitId = 2), // 브레이크 나눠 밟기: 분당수서로 정체 구간
+        RouteSegment(16, 18, habitId = 4), // 방향지시등 늦은 점등: 분당수서로 차로 변경
+    )
 
     // 이번 주 요약 (홈)
     val weekSummary = listOf(

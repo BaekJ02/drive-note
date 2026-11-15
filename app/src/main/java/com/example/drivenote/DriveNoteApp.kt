@@ -24,14 +24,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // ---- 디자인 토큰 (차량 화면: 큰 글자, 큰 터치 영역)
 private val Bg = Color(0xFFF4F5F7)
@@ -122,13 +125,8 @@ private fun SideRail(current: Tab, newBadge: Boolean, onSelect: (Tab) -> Unit) {
             .border(1.dp, Line).padding(vertical = SCREEN_PAD, horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp, bottom = 28.dp)) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Accent), contentAlignment = Alignment.Center) {
-                Text("D", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            }
-            Spacer(Modifier.width(14.dp))
-            Text("드라이브 노트", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Ink)
-        }
+        Text("드라이브 노트", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Ink,
+            modifier = Modifier.padding(start = 20.dp, bottom = 28.dp))
         Tab.values().forEach { t ->
             val sel = t == current
             Row(
@@ -178,66 +176,13 @@ private fun ItemTitle(text: String) {
     Text(text, fontSize = BODY, fontWeight = FontWeight.SemiBold, color = Ink)
 }
 
+/** 분류 표시: 분류 색의 작은 원 + 일반 굵기 이름 (색만으로 구분하지 않도록 이름을 함께 표시) */
 @Composable
 private fun CategoryTag(c: Category) {
-    Row(
-        Modifier.clip(RoundedCornerShape(12.dp)).background(c.color.copy(alpha = 0.12f))
-            .padding(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        CategoryIcon(c, 24.dp)
-        Spacer(Modifier.width(8.dp))
-        Text(c.label, fontSize = SMALL, color = c.color, fontWeight = FontWeight.Bold)
-    }
-}
-
-/** 분류를 상징하는 단순 도형 아이콘 (외부 아이콘 라이브러리 없이 Canvas로 그림) */
-@Composable
-private fun CategoryIcon(c: Category, size: Dp) {
-    Canvas(Modifier.size(size)) {
-        val s = this.size.minDimension
-        val sw = s * 0.13f
-        val col = c.color
-        when (c) {
-            Category.STEER -> { // 핸들: 바깥 원 + 가운데 허브 + 살 3개
-                drawCircle(col, radius = s * 0.42f, style = Stroke(sw))
-                drawCircle(col, radius = s * 0.13f)
-                drawLine(col, Offset(s * 0.1f, s * 0.5f), Offset(s * 0.9f, s * 0.5f), sw)
-                drawLine(col, center, Offset(s * 0.5f, s * 0.9f), sw)
-            }
-            Category.ACCEL -> { // 위로 향한 화살표
-                val p = Path().apply {
-                    moveTo(s * 0.5f, s * 0.06f); lineTo(s * 0.92f, s * 0.54f); lineTo(s * 0.08f, s * 0.54f); close()
-                }
-                drawPath(p, col)
-                drawRoundRect(col, Offset(s * 0.35f, s * 0.48f), Size(s * 0.3f, s * 0.46f), CornerRadius(s * 0.06f))
-            }
-            Category.BRAKE -> { // 정지 표지 팔각형 + 가로 막대
-                val p = Path()
-                for (k in 0 until 8) {
-                    val a = Math.toRadians(22.5 + 45.0 * k)
-                    val x = s / 2 + s * 0.48f * cos(a).toFloat()
-                    val y = s / 2 + s * 0.48f * sin(a).toFloat()
-                    if (k == 0) p.moveTo(x, y) else p.lineTo(x, y)
-                }
-                p.close()
-                drawPath(p, col)
-                drawLine(Color.White, Offset(s * 0.28f, s * 0.5f), Offset(s * 0.72f, s * 0.5f), sw * 1.1f, cap = StrokeCap.Round)
-            }
-            Category.SIGNAL -> { // 방향지시 화살표 (오른쪽)
-                drawRoundRect(col, Offset(s * 0.06f, s * 0.37f), Size(s * 0.5f, s * 0.26f), CornerRadius(s * 0.06f))
-                val p = Path().apply {
-                    moveTo(s * 0.48f, s * 0.1f); lineTo(s * 0.96f, s * 0.5f); lineTo(s * 0.48f, s * 0.9f); close()
-                }
-                drawPath(p, col)
-            }
-            Category.PARKING -> { // 주차 표지: 둥근 사각형 안의 P
-                drawRoundRect(col, size = Size(s, s), cornerRadius = CornerRadius(s * 0.22f))
-                val w = Stroke(sw, cap = StrokeCap.Round)
-                drawLine(Color.White, Offset(s * 0.36f, s * 0.24f), Offset(s * 0.36f, s * 0.78f), sw, cap = StrokeCap.Round)
-                drawArc(Color.White, -90f, 180f, false, topLeft = Offset(s * 0.16f, s * 0.24f), size = Size(s * 0.4f, s * 0.3f), style = w)
-            }
-        }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(c.color))
+        Spacer(Modifier.width(10.dp))
+        Text(c.label, fontSize = SMALL, color = Sub)
     }
 }
 
@@ -246,57 +191,93 @@ private fun CategoryIcon(c: Category, size: Dp) {
 private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Unit) {
     val d = MockData.lastDrive
     val total = MockData.habits.sumOf { it.count }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(GAP)) {
-        ScreenHeader("안녕하세요. 오늘도 안전 운전해요.")
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(GAP)) {
-            Panel(Modifier.weight(1.4f).fillMaxHeight()) {
+    val today = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREAN).format(Date()) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(32.dp)) {
+        // 인사말: 이름만 굵게
+        Column {
+            Text(buildAnnotatedString {
+                append("안녕하세요, ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("${MockData.userName}님") }
+                append(". 오늘도 안전 운전해요.")
+            }, fontSize = 60.sp, color = Ink)
+            Text("$today · 주차 중", fontSize = BODY, color = Sub, modifier = Modifier.padding(top = 8.dp))
+        }
+
+        // 최근 주행: 지도(60%) + 정보(40%)
+        Row(
+            Modifier.fillMaxWidth().height(520.dp).clip(RoundedCornerShape(RADIUS)).background(Surface)
+                .border(1.dp, Line, RoundedCornerShape(RADIUS))
+        ) {
+            Column(Modifier.weight(0.6f).fillMaxHeight()) {
+                RecentDriveMap(Accent, Modifier.weight(1f).fillMaxWidth())
+                Row(Modifier.padding(horizontal = 28.dp, vertical = 18.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                    MockData.lastDriveSegments.forEach { seg ->
+                        val h = MockData.habits.first { it.id == seg.habitId }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(10.dp).clip(CircleShape).background(h.category.color))
+                            Spacer(Modifier.width(10.dp))
+                            Text(h.name, fontSize = SMALL, color = Sub)
+                        }
+                    }
+                }
+            }
+            Column(Modifier.weight(0.4f).fillMaxHeight().padding(40.dp)) {
                 Label("최근 주행")
-                Text("${d.date} · ${d.route}", fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink,
-                    modifier = Modifier.padding(top = 12.dp))
-                Text("${d.minutes}분 · ${d.km}km · 개선 필요 ${total}건", fontSize = BODY, color = Sub,
-                    modifier = Modifier.padding(top = 4.dp))
-                Spacer(Modifier.weight(1f).heightIn(min = GAP))
+                Text("${d.date} – ${MockData.lastDriveArrive}", fontSize = SMALL, color = Sub, modifier = Modifier.padding(top = 16.dp))
+                Text(d.route, fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 4.dp))
+                Text("${MockData.lastDriveFrom} → ${MockData.lastDriveTo}", fontSize = SMALL, color = Sub)
+                Row(Modifier.fillMaxWidth().padding(top = 32.dp)) {
+                    HomeStat("소요 시간", "${d.minutes}분", Modifier.weight(1f))
+                    HomeStat("거리", "${d.km}km", Modifier.weight(1f))
+                    HomeStat("개선 필요", "${total}건", Modifier.weight(1f))
+                }
+                Spacer(Modifier.weight(1f))
                 Button(onClick = openReport, modifier = Modifier.height(TOUCH).fillMaxWidth(),
                     shape = RoundedCornerShape(ITEM_RADIUS), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                     Text("리포트 보기", fontSize = BODY, fontWeight = FontWeight.SemiBold)
                 }
             }
+        }
+
+        // 이번 주 요약 · 집중 개선 항목 (텍스트 중심, 나란히)
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(GAP)) {
+            Panel(Modifier.weight(1f).fillMaxHeight()) {
+                Label("이번 주 요약")
+                MockData.weekSummary.chunked(2).forEach { pair ->
+                    Row(Modifier.fillMaxWidth().padding(top = 20.dp)) {
+                        pair.forEach { HomeStat(it.label, it.value, Modifier.weight(1f)) }
+                    }
+                }
+            }
             Panel(Modifier.weight(1f).fillMaxHeight()) {
                 Label("집중 개선 항목")
-                Spacer(Modifier.height(12.dp))
                 MockData.habits.filter { it.id in focus }.forEach { h ->
-                    Column(Modifier.padding(vertical = 10.dp)) {
-                        CategoryTag(h.category)
-                        Text(h.name, fontSize = BODY, color = Ink, modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(h.name, fontSize = BODY, color = Ink)
+                            CategoryTag(h.category)
+                        }
+                        Text("이번 주 ${h.count}회", fontSize = BODY, color = Ink, modifier = Modifier.padding(start = 16.dp))
                     }
                 }
             }
         }
-        Panel(Modifier.fillMaxWidth()) {
-            Label("이번 주 요약")
-            Row(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                MockData.weekSummary.forEach { SummaryStat(it.label, it.value, Modifier.weight(1f)) }
-            }
-        }
-        Panel(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(20.dp).clip(CircleShape).background(if (voiceOn) Positive else Sub))
-                Spacer(Modifier.width(20.dp))
-                Column(Modifier.weight(1f)) {
-                    ItemTitle("주행 중 음성 코칭 ${if (voiceOn) "켜짐" else "꺼짐"}")
-                    Text("시동을 걸면 자동으로 기록을 시작해요. 공유 중: 가족 1명 (열람 전용)", fontSize = SMALL, color = Sub,
-                        modifier = Modifier.padding(top = 4.dp))
-                }
-            }
+
+        // 음성 코칭 상태: 한 줄 텍스트
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(if (voiceOn) Positive else Sub))
+            Spacer(Modifier.width(12.dp))
+            Text("주행 중 음성 코칭 ${if (voiceOn) "켜짐" else "꺼짐"} · 시동을 걸면 자동으로 기록해요 · 가족 1명 열람 공유 중",
+                fontSize = SMALL, color = Sub)
         }
     }
 }
 
 @Composable
-private fun SummaryStat(label: String, value: String, modifier: Modifier) {
+private fun HomeStat(label: String, value: String, modifier: Modifier) {
     Column(modifier) {
         Text(label, fontSize = SMALL, color = Sub)
-        Text(value, fontSize = 44.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 4.dp))
+        Text(value, fontSize = 40.sp, fontWeight = FontWeight.SemiBold, color = Ink)
     }
 }
 
