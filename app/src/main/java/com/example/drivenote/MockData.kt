@@ -43,7 +43,7 @@ object MockData {
     val lastDrive = DriveSummary("11월 15일 (일) 08:42", "집 → 회사", 34, 14.8)
     val lastDriveDepart = "08:42"
     val lastDriveArrive = "09:16"
-    val lastDriveIssues = 7 // 최근 주행 1회의 개선 필요 건수 (홈 카드)
+    val lastDriveIssues = 8 // 최근 주행 1회의 개선 필요 건수 (홈 카드) = homeIssues 합계
     val lastDriveFrom = "성남 수정구 시흥동"
     val lastDriveTo = "강남구 삼성동"
 
@@ -105,12 +105,13 @@ object MockData {
 
     // 리포트 공유 대상 (열람 전용)
     val sharedWith = "엄마"
-    // 홈 '개선할 점' 패널: 최근 주행의 개선 필요 항목 (이름, 분류, 건수) — 합계 7건
+    // 홈 '개선할 점' 패널: 최근 주행의 개선 필요 항목 (이름, 분류, 건수) — 합계 8건 (= lastDriveIssues)
     val homeIssues = listOf(
         Triple("브레이크 나눠 밟기", IssueType.BRAKE, 2),
         Triple("정차 직전 급제동", IssueType.BRAKE, 1),
         Triple("급출발·급가속", IssueType.ACCEL, 2),
         Triple("방향지시등 늦게 켬", IssueType.SIGNAL, 1),
+        Triple("우회전 전 일시정지 안 함", IssueType.SIGNAL, 1),
         Triple("핸들 급조작", IssueType.STEER, 1),
     )
 
@@ -182,7 +183,7 @@ object ReportData {
     private val places = mapOf(
         "시흥사거리" to (1 to 3), "대왕판교로" to (4 to 6), "헌릉로" to (7 to 9), "헌릉IC" to (9 to 11),
         "분당수서로" to (12 to 15), "수서IC" to (15 to 17), "대치동" to (16 to 18), "삼성동" to (19 to 21),
-        "대치동 교차로 우회전" to (18 to 20),
+        "대치동 교차로 우회전" to (18 to 20), "대치역 사거리" to (19 to 21),
     )
     private val pangyoPlaces = mapOf("시흥동 교차로" to (0 to 1), "대왕판교로" to (1 to 3), "판교IC" to (3 to 5))
 
@@ -197,12 +198,14 @@ object ReportData {
         "핸들 과다 조작" to "핸들을 조금 덜 돌려도 충분히 회전할 수 있어요.",
         "차로 내 흔들림" to "시선을 멀리 두면 차로 가운데를 더 쉽게 유지할 수 있어요.",
         "핸들 급조작" to "핸들을 조금 더 천천히, 여유 있게 돌려 보세요.",
+        "우회전 전 일시정지 안 함" to "횡단보도 앞에서 완전히 멈췄다가 출발해 보세요.",
     )
     private val typeOf = mapOf(
         "급출발" to IssueType.ACCEL, "급가속" to IssueType.ACCEL,
         "브레이크 나눠 밟기" to IssueType.BRAKE, "급제동" to IssueType.BRAKE, "정차 직전 급제동" to IssueType.BRAKE,
         "방향지시등 늦게 켬" to IssueType.SIGNAL, "방향지시등 미점등" to IssueType.SIGNAL,
         "핸들 과다 조작" to IssueType.STEER, "차로 내 흔들림" to IssueType.STEER, "핸들 급조작" to IssueType.STEER,
+        "우회전 전 일시정지 안 함" to IssueType.SIGNAL,
     )
 
     /** 문제 목록 생성: (제목, 장소) 순서대로 번호를 붙이고, 시간은 경로상 위치로 계산 (explicit이 있으면 그 시간) */
@@ -274,10 +277,10 @@ object ReportData {
         ),
         15 to listOf(
             // 홈 '최근 주행'과 같은 주행 (구간도 홈 지도와 동일)
-            trip("08:42", "시흥동", "삼성동", 34, 14.8, 7, toWork,
-                "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "대치동",
-                "핸들 급조작" to "대치동 교차로 우회전",
-                times = listOf("08:44", "09:05", "09:12", "09:14")),
+            trip("08:42", "시흥동", "삼성동", 34, 14.8, 8, toWork,
+                "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로", "우회전 전 일시정지 안 함" to "대치역 사거리",
+                "방향지시등 늦게 켬" to "대치동", "핸들 급조작" to "대치동 교차로 우회전",
+                times = listOf("08:44", "09:05", "09:10", "09:12", "09:14")),
             trip("18:20", "삼성동", "시흥동", 41, 15.2, 4, toHome, "급제동" to "삼성동", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "헌릉IC"),
             trip("20:05", "시흥동", "판교", 18, 7.9, 1, toPangyo, "급출발" to "시흥동 교차로"),
         ),
@@ -289,6 +292,7 @@ object ReportData {
 /** 문장 안의 **굵게** 표시는 화면에서 굵은 글씨로 바뀜 */
 sealed interface Comparison {
     val summary: String
+    val metric: String? get() = null // 그림 아래 지표 한 줄 (없으면 생략)
 
     /** 꺾은선 2개: 내 운전(분류 색 실선) vs 권장(회색 점선) */
     data class Chart(
@@ -296,8 +300,24 @@ sealed interface Comparison {
         val yMin: Float, val yMax: Float, override val summary: String,
     ) : Comparison
 
-    /** 그래프가 어색한 항목(방향지시등): 타임라인 한 줄 */
+    /** 그래프가 어색한 항목: 타임라인 한 줄 */
     data class Timeline(override val summary: String) : Comparison
+
+    /** 정지선 접근: 정지선까지 남은 거리(m), 0.1초 간격. 그림은 0.5초마다 샘플링 */
+    data class StopApproach(
+        val mine: List<Float>, val recommended: List<Float>, override val metric: String, override val summary: String,
+    ) : Comparison
+
+    /** 차로 변경: 방향지시등을 켠 지점이 차로를 넘은 지점보다 몇 m 앞인지 */
+    data class LaneChange(
+        val mineSignalM: Float, val recSignalM: Float, override val metric: String, override val summary: String,
+    ) : Comparison
+
+    /** 횡단보도 앞 속도: 횡단보도까지 남은 거리(m, 음수는 지난 뒤) → 속도(km/h) */
+    data class CrossingSpeed(
+        val distance: List<Float>, val mine: List<Float>, val recommended: List<Float>,
+        override val metric: String, override val summary: String,
+    ) : Comparison
 }
 
 object ComparisonData {
@@ -344,14 +364,6 @@ object ComparisonData {
         yMin = 0f, yMax = 8f,
         summary = "감속도가 최대 **6.5m/s²**까지 올라갔어요 → 미리 **3m/s²** 이하로 천천히 줄여 보세요",
     )
-    private val stopBrake = Comparison.Chart(
-        "감속도(m/s²)",
-        // 일정하게 줄이다가 멈추기 직전에 확 밟음
-        mine = series { 2f * ramp(it, -2f, 0.5f) * (1 - ramp(it, 2.4f, 0.2f)) + 3.5f * hill(it, 1.6f, 0.3f, 0.3f, 0.2f) },
-        recommended = series { 2f * ramp(it, -2f, 0.5f) * (1 - ramp(it, 0.5f, 2.5f)) },
-        yMin = 0f, yMax = 6f,
-        summary = "멈추기 직전 감속도가 **5.5m/s²**로 튀었어요 → 마지막 **1초**는 브레이크를 살짝 풀어 보세요",
-    )
     private val sway = Comparison.Chart(
         "조향각(°)",
         mine = series { 12f * kotlin.math.sin(it * 4.2f) },
@@ -360,16 +372,126 @@ object ComparisonData {
         summary = "핸들이 좌우로 최대 **12°**씩 흔들렸어요 → **3°** 이내로 부드럽게 잡아 보세요",
     )
 
+    /** 40km/h에서 정지할 때 정지선까지 남은 거리 (0.1초 간격). decel(v) = 그 속도에서의 감속도(m/s²) */
+    private fun stopRemain(decel: (Float) -> Float): List<Float> {
+        var v = 40f / 3.6f; var s = 0f
+        val pos = mutableListOf(0f)
+        while (v > 0f) {
+            val nv = maxOf(0f, v - decel(v) * 0.1f)
+            s += (v + nv) / 2 * 0.1f; v = nv; pos += s
+        }
+        return pos.map { s - it }
+    }
+    private val stopApproach = Comparison.StopApproach(
+        // 내 운전: 7.5m/s까지 살살(0.08g) 줄이다가 마지막에 0.45g로 급제동 → 마지막 점들이 뭉침
+        mine = stopRemain { v -> if (v > 7.5f) 0.8f else 4.4f },
+        // 권장: 0.2g로 일정하게 → 간격이 고르게 좁아짐
+        recommended = stopRemain { 1.96f },
+        metric = "멈추기 직전 감속 **0.45g** → 권장 **0.2g** 이하",
+        summary = "정지선 **20m** 전부터 천천히 힘을 빼며 멈추면 덜 덜컹거려요",
+    )
+    private val laneChange = Comparison.LaneChange(
+        12f, 30f,
+        metric = "차로 변경 **12m** 전에 켬 → 권장 **30m** 전 (약 **3초** 전)",
+        summary = "차로를 바꾸기 **3초** 전쯤 켜면 뒤차가 미리 알 수 있어요",
+    )
+    private fun smooth01(x: Float): Float { val c = x.coerceIn(0f, 1f); return c * c * (3 - 2 * c) }
+    private val crossingDist = List(77) { 30f - it * 0.5f } // 30m → -8m
+    private val crossing = Comparison.CrossingSpeed(
+        crossingDist,
+        // 내 운전: 3m 앞에서 최저 8km/h, 그대로 다시 가속
+        mine = crossingDist.map { d -> if (d >= 3f) 8f + 17f * smooth01((d - 3f) / 27f) else 8f + 7f * smooth01((3f - d) / 11f) },
+        // 권장: 1m 앞에서 0km/h까지 멈췄다가 출발
+        recommended = crossingDist.map { d -> if (d >= 1f) 25f * smooth01((d - 1f) / 29f) else 12f * smooth01((1f - d) / 9f) },
+        metric = "최저 속도 **8km/h** → 권장 **0km/h** (완전히 정지)",
+        summary = "우회전 전 횡단보도 앞에서는 **완전히** 멈췄다 출발해요",
+    )
+
     /** 문제 항목 → 비교 그래프 (제목 기준) */
     fun forIssue(i: DriveIssue): Comparison = when (i.title) {
+        "정차 직전 급제동" -> stopApproach
+        "방향지시등 늦게 켬" -> laneChange
+        "우회전 전 일시정지 안 함" -> crossing
         "핸들 급조작", "핸들 과다 조작" -> steering
         "차로 내 흔들림" -> sway
         "급출발" -> accel
         "급가속" -> accel.copy(summary = "**1초** 만에 페달을 **80%** 밟았어요 → **2초** 이상에 걸쳐 속도를 올려 보세요")
         "브레이크 나눠 밟기" -> brakeSplit
         "급제동" -> hardBrake
-        "정차 직전 급제동" -> stopBrake
         "방향지시등 미점등" -> Comparison.Timeline("방향지시등 없이 차로 변경 → 차로를 바꾸기 **3초** 전에 켜 주세요")
         else -> Comparison.Timeline("방향지시등 켬 **0.5초** 후 차로 변경 → **3초** 전에 켜 주세요")
     }
+}
+
+// ---------------- 리포트: 주행 전체 쏠림 요약 (G-G 다이어그램)
+
+/** 쏠림 샘플 1개: 좌우 g(오른쪽 +), 앞뒤 g(가속 +) */
+data class GSample(val lat: Float, val lon: Float)
+data class GSummary(val samples: List<GSample>, val insidePct: Int, val maxBrake: Float, val maxTurn: Float)
+
+object GForceData {
+    const val COMFORT = 0.2f // 편안한 범위 (g)
+    private val cache = mutableMapOf<TripLog, GSummary>()
+
+    fun forTrip(t: TripLog): GSummary = cache.getOrPut(t) { generate(t) }
+
+    private fun ramp(t: Float, t0: Float, dur: Float): Float { val x = ((t - t0) / dur).coerceIn(0f, 1f); return x * x * (3 - 2 * x) }
+    /** 가운데가 0초인 산 모양 (rise초 올라가고 hold초 유지, rise초 내려옴) */
+    private fun hill(t: Float, rise: Float, hold: Float) = ramp(t, -hold / 2 - rise, rise) - ramp(t, hold / 2, rise)
+
+    /**
+     * 주행 하나의 샘플 300개 (0.5초 간격) 목업.
+     * 평소엔 작은 흔들림만 있고, 문제 항목마다 그 종류의 쏠림 이벤트를 넣음.
+     * 앞뒤 g = 차속 미분, 좌우 g = v·ω (자전거 모델: 조향각 δ → ω = v·tanδ / 축거)
+     */
+    private fun generate(t: TripLog): GSummary {
+        val n = 300; val dt = 0.5f; val g = 9.81f; val wheelBase = 2.9f
+        val rnd = java.util.Random(t.start.hashCode().toLong() * 31 + t.route.size)
+        val lonEv = FloatArray(n); val latEv = FloatArray(n); val env = FloatArray(n)
+        fun add(arr: FloatArray, center: Float, peak: Float, rise: Float, hold: Float) {
+            for (i in 0 until n) {
+                val v = peak * hill(i * dt - center, rise, hold)
+                arr[i] += v
+                env[i] = maxOf(env[i], kotlin.math.abs(v / peak))
+            }
+        }
+        t.issues.forEachIndexed { k, issue ->
+            // 이벤트 시각(초). 샘플 시각에 맞춰 최고점이 샘플에 찍히게 함
+            val c = kotlin.math.round((k + 1) * n / (t.issues.size + 1f)) * dt
+            when (issue.title) {
+                // 완만한 산 모양: 샘플들이 한 점에 겹치지 않고 0.2g 밖에서 퍼지게
+                "급출발" -> add(lonEv, c, 0.35f, 2.4f, 0.5f)
+                "급가속" -> add(lonEv, c, 0.32f, 1.8f, 0f)
+                "브레이크 나눠 밟기" -> { add(lonEv, c, -0.45f, 1.3f, 0f); add(lonEv, c + 3f, -0.38f, 1.3f, 0f); add(lonEv, c + 6f, -0.41f, 1.3f, 0f) }
+                "급제동" -> add(lonEv, c, -0.5f, 0.5f, 0.8f)
+                "정차 직전 급제동" -> add(lonEv, c, -0.45f, 0.4f, 0.4f)
+                "핸들 급조작" -> add(latEv, c, 0.56f, 2.2f, 0f)
+                "핸들 과다 조작" -> add(latEv, c, -0.48f, 0.8f, 0.4f)
+                "차로 내 흔들림" -> { add(latEv, c, 0.24f, 0.6f, 0.2f); add(latEv, c + 2f, -0.24f, 0.6f, 0.2f); add(latEv, c + 4f, 0.22f, 0.6f, 0.2f) }
+                "우회전 전 일시정지 안 함" -> { add(latEv, c, 0.3f, 2f, 1.5f); add(lonEv, c - 3f, -0.15f, 1f, 0.5f) }
+                else -> { add(latEv, c, 0.15f, 1f, 0.5f); add(latEv, c + 2.5f, -0.15f, 1f, 0.5f) } // 차로 변경: 편안한 범위 안
+            }
+        }
+        var v = 13f // m/s
+        val samples = List(n) { i ->
+            val calm = 1f - env[i] // 이벤트 중에는 잡음·속도 복원을 줄임
+            val aG = lonEv[i] + calm * 0.045f * rnd.nextGaussian().toFloat()
+            val a = aG * g - calm * 0.08f * (v - 13f)
+            val nv = maxOf(1f, v + a * dt)
+            val lon = (nv - v) / dt / g // 차속 미분
+            val latWanted = latEv[i] + calm * 0.045f * rnd.nextGaussian().toFloat()
+            val delta = kotlin.math.atan(latWanted * g * wheelBase / (v * v)) // 조향각
+            val omega = v * kotlin.math.tan(delta) / wheelBase                // 요레이트
+            val lat = v * omega / g                                            // 좌우 g = v·ω
+            v = nv
+            GSample(lat, lon)
+        }
+        val inside = samples.count { kotlin.math.hypot(it.lat, it.lon) <= COMFORT }
+        return GSummary(
+            samples, (inside * 100f / n).roundToIntSafe(),
+            maxBrake = samples.maxOf { -it.lon }.coerceAtLeast(0f),
+            maxTurn = samples.maxOf { kotlin.math.abs(it.lat) },
+        )
+    }
+    private fun Float.roundToIntSafe() = kotlin.math.round(this).toInt()
 }

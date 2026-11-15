@@ -68,20 +68,20 @@ import java.util.Locale
 // ---- 디자인 토큰 (차량 화면: 큰 글자, 큰 터치 영역)
 private val Bg = Color(0xFFF4F5F7)
 private val Surface = Color.White
-private val Ink = Color(0xFF111418)
-private val Sub = Color(0xFF5F6672)
-private val Line = Color(0xFFE2E5EA)
-private val Accent = Color(0xFF1A73E8)
-private val Danger = Color(0xFFD9443B)
+internal val Ink = Color(0xFF111418)
+internal val Sub = Color(0xFF5F6672)
+internal val Line = Color(0xFFE2E5EA)
+internal val Accent = Color(0xFF1A73E8)
+internal val Danger = Color(0xFFD9443B)
 private val Positive = Color(0xFF2E9E5B)
 private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경
 private val DividerGray = Color(0xFFD0D4D9) // 텍스트 구분자 "|"
-private val IconGray = Color(0xFF3C4149)   // 흰 원형 버튼 아이콘
-private val ChartBg = Color(0xFFF6F7F9)    // 비교 그래프 배경
-private val RecommendGray = Color(0xFF8A9099) // 비교 그래프 '권장' 선
-private val ChartBorder = Color(0xFFE6E8EC)   // 비교 그래프 박스 테두리
-private val ChartGrid = Color(0xFFE3E6EA)     // 비교 그래프 가로 보조선
-private val ChartLabel = Color(0xFF9AA0A6)    // 비교 그래프 단위·x축 라벨
+internal val IconGray = Color(0xFF3C4149)   // 흰 원형 버튼 아이콘
+internal val ChartBg = Color(0xFFF6F7F9)    // 비교 그래프 배경
+internal val RecommendGray = Color(0xFF8A9099) // 비교 그래프 '권장' 선
+internal val ChartBorder = Color(0xFFE6E8EC)   // 비교 그래프 박스 테두리
+internal val ChartGrid = Color(0xFFE3E6EA)     // 비교 그래프 가로 보조선
+internal val ChartLabel = Color(0xFF9AA0A6)    // 비교 그래프 단위·x축 라벨
 
 private val TOUCH = 100.dp          // 차량 화면용 최소 터치 영역
 private val SCREEN_PAD = 40.dp      // 콘텐츠 영역 바깥 여백
@@ -94,7 +94,7 @@ private val DISPLAY = 64.sp
 private val TITLE = 48.sp
 private val HEADLINE = 40.sp
 private val BODY = 32.sp
-private val SMALL = 26.sp
+internal val SMALL = 26.sp
 
 enum class Tab(val label: String) { HOME("홈"), REPORT("리포트"), TREND("개선 추이"), SETTINGS("설정") }
 @Composable
@@ -676,11 +676,20 @@ private fun TripDetail(t: TripLog) {
         Text("${t.start} ${t.from} → ${t.to}", fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f))
         Text("${t.minutes}분 · ${t.km}km · 개선 ${t.issueCount}건", fontSize = SMALL, color = Sub)
     }
-    HomeRouteMap(
-        Accent, bottomInset = 0.dp,
-        modifier = Modifier.padding(top = 20.dp).fillMaxWidth().height(380.dp).clip(RoundedCornerShape(ITEM_RADIUS)),
-        overlay = tripRouteOverlay(t, Accent), focus = focus,
-    )
+    // 지도 | 쏠림 요약 (같은 자리, 같은 크기)
+    var mapView by remember(t) { mutableIntStateOf(0) }
+    SegmentTabs(listOf("지도", "쏠림 요약"), mapView, { mapView = it }, Modifier.padding(top = 12.dp))
+    Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(340.dp)) {
+        if (mapView == 0) {
+            HomeRouteMap(
+                Accent, bottomInset = 0.dp,
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(ITEM_RADIUS)),
+                overlay = tripRouteOverlay(t, Accent), focus = focus,
+            )
+        } else {
+            GForceViz(t, Modifier.fillMaxSize())
+        }
+    }
     // 문제 목록: 누르면 아래로 '내 운전 vs 권장' 비교가 펼쳐짐 (한 번에 하나, 처음엔 첫 항목)
     var expanded by remember(t) { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
@@ -725,124 +734,6 @@ private fun TripDetail(t: TripLog) {
     }
 }
 
-/** '내 운전 vs 권장' 비교: 꺾은선 그래프(또는 타임라인) + 한 줄 비교 문장 */
-@Composable
-private fun ComparisonView(c: Comparison, color: Color, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        when (c) {
-            is Comparison.Chart -> CompareChart(c, color)
-            is Comparison.Timeline -> {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(ChartBg).padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(12.dp).clip(CircleShape).background(color))
-                    Text(boldMarkup(c.summary), fontSize = SMALL, color = Ink, modifier = Modifier.padding(start = 14.dp))
-                }
-            }
-        }
-        if (c is Comparison.Chart) {
-            Text(boldMarkup(c.summary), fontSize = 28.sp, color = Ink, modifier = Modifier.padding(top = 14.dp))
-        }
-    }
-}
-
-/** 문장의 **굵게** 부분을 굵은 글씨로 */
-private fun boldMarkup(text: String) = buildAnnotatedString {
-    text.split("**").forEachIndexed { i, part ->
-        if (i % 2 == 1) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) } else append(part)
-    }
-}
-
-/**
- * 내 운전 vs 권장 꺾은선 (흰 박스, 가로 보조선 5줄).
- * 내 운전: 분류 색 3.5dp 곡선 + 은은한 빛번짐 + 아래로 옅어지는 면. 권장: 회색 2.5dp 점선 곡선.
- */
-@Composable
-private fun CompareChart(c: Comparison.Chart, color: Color) {
-    val measurer = rememberTextMeasurer()
-    Column(
-        Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(20.dp)).background(Color.White)
-            .border(1.dp, ChartBorder, RoundedCornerShape(20.dp)).padding(20.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(c.unit, fontSize = 18.sp, color = ChartLabel)
-            Spacer(Modifier.weight(1f))
-            LegendLine(color, dashed = false); Text("내 운전", fontSize = 18.sp, color = IconGray, modifier = Modifier.padding(start = 8.dp, end = 20.dp))
-            LegendLine(RecommendGray, dashed = true); Text("권장", fontSize = 18.sp, color = IconGray, modifier = Modifier.padding(start = 8.dp))
-        }
-        Canvas(Modifier.fillMaxWidth().weight(1f).padding(top = 10.dp)) {
-            val labelH = 26.dp.toPx()
-            val plotTop = 6.dp.toPx(); val plotBottom = size.height - labelH
-            val side = 16.dp.toPx()
-            val n = c.mine.size
-            val tEnd = ComparisonData.T_START + (n - 1) * ComparisonData.T_STEP
-            fun x(t: Float) = side + (t - ComparisonData.T_START) / (tEnd - ComparisonData.T_START) * (size.width - 2 * side)
-            fun y(v: Float) = plotBottom - (v - c.yMin) / (c.yMax - c.yMin) * (plotBottom - plotTop)
-            fun points(vs: List<Float>) = vs.mapIndexed { i, v -> Offset(x(ComparisonData.T_START + i * ComparisonData.T_STEP), y(v)) }
-
-            // 가로 보조선 5줄 (0, 25, 50, 75, 100%)
-            for (k in 0..4) {
-                val gy = plotBottom - (plotBottom - plotTop) * k / 4f
-                drawLine(ChartGrid, Offset(0f, gy), Offset(size.width, gy), strokeWidth = 1.dp.toPx())
-            }
-
-            val mine = points(c.mine)
-            fun smooth(pts: List<Offset>) = smoothPath(pts, plotTop, plotBottom)
-            val minePath = smooth(mine)
-            // 선 아래 면: 분류 색 22% → 바닥 0%
-            val area = smooth(mine).apply { lineTo(mine.last().x, plotBottom); lineTo(mine.first().x, plotBottom); close() }
-            drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f)), startY = plotTop, endY = plotBottom))
-
-            // 권장: 회색 점선 곡선
-            drawPath(smooth(points(c.recommended)), RecommendGray, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round,
-                join = StrokeJoin.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 8.dp.toPx()))))
-
-            // 내 운전: 빛번짐(같은 색 30%, 10dp, 흐림) → 본선 3.5dp
-            drawIntoCanvas { canvas ->
-                val glow = androidx.compose.ui.graphics.Paint().asFrameworkPaint().apply {
-                    isAntiAlias = true
-                    style = android.graphics.Paint.Style.STROKE
-                    strokeWidth = 10.dp.toPx(); strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
-                    this.color = color.copy(alpha = 0.3f).toArgb()
-                    maskFilter = android.graphics.BlurMaskFilter(6.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
-                }
-                canvas.nativeCanvas.drawPath(minePath.asAndroidPath(), glow)
-            }
-            drawPath(minePath, color, style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-
-            // x축 라벨 (초)
-            listOf(-2f to "-2초", 0f to "0", 2f to "2초", 4f to "4초").forEach { (t, label) ->
-                val l = measurer.measure(label, TextStyle(fontSize = 16.sp, color = ChartLabel))
-                drawText(l, topLeft = Offset((x(t) - l.size.width / 2f).coerceIn(0f, size.width - l.size.width), plotBottom + 6.dp.toPx()))
-            }
-        }
-    }
-}
-
-/** 점들을 지나는 부드러운 곡선 (Catmull-Rom → cubicTo). 제어점 y를 [minY, maxY]로 제한해 범위 밖으로 넘치지 않게 함 */
-private fun smoothPath(p: List<Offset>, minY: Float = Float.NEGATIVE_INFINITY, maxY: Float = Float.POSITIVE_INFINITY) = Path().apply {
-    if (p.isEmpty()) return@apply
-    moveTo(p[0].x, p[0].y)
-    for (i in 0 until p.lastIndex) {
-        val p0 = p[maxOf(i - 1, 0)]; val p1 = p[i]; val p2 = p[i + 1]; val p3 = p[minOf(i + 2, p.lastIndex)]
-        cubicTo(
-            p1.x + (p2.x - p0.x) / 6f, (p1.y + (p2.y - p0.y) / 6f).coerceIn(minY, maxY),
-            p2.x - (p3.x - p1.x) / 6f, (p2.y - (p3.y - p1.y) / 6f).coerceIn(minY, maxY),
-            p2.x, p2.y,
-        )
-    }
-}
-
-/** 범례 선 샘플 (실선/점선) */
-@Composable
-private fun LegendLine(color: Color, dashed: Boolean) {
-    Canvas(Modifier.width(28.dp).height(10.dp)) {
-        drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2),
-            strokeWidth = (if (dashed) 2.5f else 3.5f).dp.toPx(), cap = StrokeCap.Round,
-            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 5.dp.toPx())) else null)
-    }
-}
 
 // ---------------- 개선 추이 (최근 4주 꺾은선)
 @Composable
