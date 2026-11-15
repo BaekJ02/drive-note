@@ -105,6 +105,8 @@ object MockData {
 
     // 리포트 공유 대상 (열람 전용)
     val sharedWith = "엄마"
+    // 홈 공유 다이얼로그: (이름, 관계)
+    val shareTargets = listOf("김강사" to "운전 강사", "가족" to "엄마")
 
     val habits = listOf(
         Habit(1, Category.ACCEL, "급출발·급가속", 2, "수정구 시흥동 교차로 외 1곳",

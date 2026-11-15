@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.YearMonth
@@ -59,6 +60,7 @@ private val Positive = Color(0xFF2E9E5B)
 private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경, 파란 배지 배경
 private val DangerBg = Color(0xFFFCE8E6)   // 연한 빨강 배지 배경
 private val NeutralBg = Color(0xFFF1F3F4)  // 회색 배지 배경
+private val IconGray = Color(0xFF3C4149)   // 흰 원형 버튼 아이콘
 
 private val TOUCH = 100.dp          // 차량 화면용 최소 터치 영역
 private val SCREEN_PAD = 40.dp      // 콘텐츠 영역 바깥 여백
@@ -116,7 +118,7 @@ fun DriveNoteApp(vehicle: VehicleRepository, engine: CoachingEngine, speak: (Str
                     SideRail(tab, hasNewReport) { tab = it; if (it == Tab.REPORT) hasNewReport = false }
                     Box(Modifier.weight(1f).fillMaxHeight().padding(SCREEN_PAD)) {
                         when (tab) {
-                            Tab.HOME -> HomeScreen { tab = Tab.REPORT; hasNewReport = false }
+                            Tab.HOME -> HomeScreen(voiceOn, { voiceOn = it }) { tab = Tab.REPORT; hasNewReport = false }
                             Tab.REPORT -> ReportScreen()
                             Tab.TREND -> TrendScreen(focus)
                             Tab.SETTINGS -> SettingsScreen(voiceOn, { voiceOn = it }, focus)
@@ -202,8 +204,11 @@ private fun CategoryTag(c: Category) {
 
 // ---------------- 홈
 @Composable
-private fun HomeScreen(openReport: () -> Unit) {
-    val d = MockData.lastDrive
+private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport: () -> Unit) {
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var showShare by remember { mutableStateOf(false) }
+    fun toast(msg: String) = scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(msg) }
     val today = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREAN).format(Date()) }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
         // 인사말: 이름만 굵게
@@ -235,11 +240,78 @@ private fun HomeScreen(openReport: () -> Unit) {
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
             FloatingDriveBar(openReport, Modifier.align(Alignment.BottomCenter))
+            // 원형 버튼 2개: 오른쪽 끝을 '리포트 보기' 버튼 오른쪽 끝에 맞추고, 바 위로 16dp
+            Column(
+                Modifier.align(Alignment.BottomEnd)
+                    .padding(end = HOME_BAR_MARGIN + HOME_BAR_END_PAD, bottom = barInset + 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                RoundIconButton(
+                    if (voiceOn) R.drawable.ic_volume_up else R.drawable.ic_volume_off,
+                    if (voiceOn) "음성 코칭 끄기" else "음성 코칭 켜기",
+                    bg = if (voiceOn) Accent else Color.White, tint = if (voiceOn) Color.White else IconGray,
+                ) {
+                    setVoice(!voiceOn)
+                    toast(if (!voiceOn) "주행 중 음성 코칭을 켰어요" else "주행 중 음성 코칭을 껐어요")
+                }
+                RoundIconButton(R.drawable.ic_share, "주행 리포트 공유", bg = Color.White, tint = IconGray) { showShare = true }
+            }
+            // 스낵바: 지도 하단, 떠 있는 바 바로 위 가운데
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = barInset + 8.dp))
+        }
+    }
+    if (showShare) {
+        ShareDialog(onDismiss = { showShare = false }) {
+            showShare = false
+            toast("열람 전용 링크를 복사했어요")
         }
     }
 }
 
+/** 지도 위 원형 아이콘 버튼 (지름 56dp, 옅은 그림자, 아이콘만) */
+@Composable
+private fun RoundIconButton(icon: Int, description: String, bg: Color, tint: Color, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = CircleShape, color = bg, shadowElevation = 4.dp, modifier = Modifier.size(56.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(painterResource(icon), contentDescription = description, tint = tint, modifier = Modifier.size(26.dp))
+        }
+    }
+}
+
+/** 주행 리포트 공유 다이얼로그 (목업: 실제 링크는 만들지 않음) */
+@Composable
+private fun ShareDialog(onDismiss: () -> Unit, onCopy: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = { Text("주행 리포트 공유", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Ink) },
+        text = {
+            Column {
+                Text("공유한 사람은 리포트를 볼 수만 있어요.", fontSize = SMALL, color = Sub)
+                MockData.shareTargets.forEach { (name, role) ->
+                    Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("$name · $role", fontSize = BODY, color = Ink, modifier = Modifier.weight(1f))
+                        Pill("열람 중", NeutralBg, Sub, Modifier.padding(start = 24.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onCopy, modifier = Modifier.height(64.dp), shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Accent), contentPadding = PaddingValues(horizontal = 28.dp)) {
+                Text("링크 복사", fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.height(64.dp)) {
+                Text("닫기", fontSize = 26.sp, color = Sub)
+            }
+        },
+    )
+}
+
 private val HOME_BAR_HEIGHT = 108.dp
+private val HOME_BAR_END_PAD = 20.dp // 바 안쪽 오른쪽 여백 ('리포트 보기' 버튼 오른쪽 끝 위치)
 private val HOME_BAR_MARGIN = 24.dp
 private val HOME_BAR_SHAPE = RoundedCornerShape(28.dp)
 
@@ -257,7 +329,7 @@ private fun FloatingDriveBar(openReport: () -> Unit, modifier: Modifier) {
             .clip(HOME_BAR_SHAPE)
     ) {
         Box(Modifier.matchParentSize().background(Color.White.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.6f), HOME_BAR_SHAPE))
-        Row(Modifier.fillMaxSize().padding(start = 32.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxSize().padding(start = 32.dp, end = HOME_BAR_END_PAD), verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("${MockData.lastDriveDepart} → ${MockData.lastDriveArrive}", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Ink)
                 Text("시흥동 → 삼성동", fontSize = 24.sp, color = Sub)
