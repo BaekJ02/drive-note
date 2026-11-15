@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
@@ -439,17 +440,12 @@ private fun ReportScreen(trip: TripRecord?) {
 /** 간단한 지도 일러스트: 연한 도로 격자 + 주행 경로 곡선 + 습관 발생 지점 마커 */
 @Composable
 private fun RouteMap(habit: Habit, modifier: Modifier) {
-    Canvas(modifier.clip(RoundedCornerShape(ITEM_RADIUS)).background(Color(0xFFEDF1F6))) {
+    val measurer = rememberTextMeasurer()
+    Canvas(modifier.clip(RoundedCornerShape(ITEM_RADIUS)).background(MapIllustrationBg)) {
         val w = size.width
         val h = size.height
-        // 공원·하천 블록
-        drawRoundRect(Color(0xFFDCEFDF), Offset(w * 0.56f, h * 0.55f), Size(w * 0.22f, h * 0.3f), CornerRadius(12.dp.toPx()))
-        drawRoundRect(Color(0xFFD6E6F7), Offset(w * 0.05f, h * 0.08f), Size(w * 0.18f, h * 0.26f), CornerRadius(12.dp.toPx()))
-        // 도로 격자
-        val road = 10.dp.toPx()
-        for (k in 1..5) drawLine(Color.White, Offset(w * k / 6f, 0f), Offset(w * k / 6f, h), road)
-        for (k in 1..3) drawLine(Color.White, Offset(0f, h * k / 4f), Offset(w, h * k / 4f), road)
-        drawLine(Color.White, Offset(0f, h), Offset(w * 0.55f, 0f), road * 1.6f) // 대로
+        // 도로망·한강·공원 배경 (홈 대체 지도와 공통)
+        drawMapBase()
 
         // 주행 경로 (3차 베지어 곡선)
         val p0 = Offset(w * 0.07f, h * 0.84f)
@@ -465,6 +461,9 @@ private fun RouteMap(habit: Habit, modifier: Modifier) {
         drawCircle(Accent, 11.dp.toPx(), p0, style = Stroke(4.dp.toPx()))
         drawCircle(Accent, 12.dp.toPx(), p3)
         drawCircle(Color.White, 5.dp.toPx(), p3)
+        // 출발·도착 지명
+        drawPlaceLabel(measurer, "시흥동", p0)
+        drawPlaceLabel(measurer, "삼성동", p3)
 
         // 발생 지점: 경로 위에 count개를 고르게 배치 (습관별로 조금씩 위치가 다르게)
         repeat(habit.count) { i ->

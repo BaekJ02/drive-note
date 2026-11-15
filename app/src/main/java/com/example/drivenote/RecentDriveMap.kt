@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -83,7 +84,7 @@ fun initOsmdroid(context: Context) {
         Log.w(TAG, "osmdroid 설정 실패", t)
     }
 }
-private val MapBg = Color(0xFFEDF1F6)
+private val MapBg = MapIllustrationBg
 private val Casing = Color.White
 
 /**
@@ -263,13 +264,10 @@ private fun hasNetwork(context: Context): Boolean = try {
 @Composable
 private fun RouteIllustration(routeColor: Color, modifier: Modifier) {
     val route = MockData.lastDriveRoute
+    val measurer = rememberTextMeasurer()
     Canvas(modifier) {
-        // 연한 도로 격자
-        val grid = 56.dp.toPx()
-        var x = grid / 2
-        while (x < size.width) { drawLine(Color.White, Offset(x, 0f), Offset(x, size.height), 6.dp.toPx()); x += grid }
-        var y = grid / 2
-        while (y < size.height) { drawLine(Color.White, Offset(0f, y), Offset(size.width, y), 6.dp.toPx()); y += grid }
+        // 도로망·한강·공원 배경
+        drawMapBase()
 
         // 위경도 → 화면 좌표 (경도는 위도에 따라 축소)
         val k = cos(Math.toRadians(route.map { it.lat }.average()))
@@ -299,5 +297,8 @@ private fun RouteIllustration(routeColor: Color, modifier: Modifier) {
         drawCircle(routeColor, 11.dp.toPx(), start, style = Stroke(4.dp.toPx()))
         drawCircle(Color.White, 13.dp.toPx(), end)
         drawCircle(routeColor, 9.dp.toPx(), end)
+        // 출발·도착 지명
+        drawPlaceLabel(measurer, "시흥동", start)
+        drawPlaceLabel(measurer, "삼성동", end)
     }
 }
