@@ -40,6 +40,7 @@ import kotlin.math.tan
 
 private const val TAG = "RouteMap"
 private const val TILE = 256.0
+private const val NAVER_LEVEL_OFFSET = 1 // tools/make_route_map.py의 LEVEL_OFFSET과 같아야 함
 private val Casing = Color.White
 
 /**
@@ -93,9 +94,9 @@ private fun loadRouteMapImage(context: Context): ImageBitmap? = try {
     Log.w(TAG, "지도 이미지 로드 실패 → 대체 지도 사용", t); null
 }
 
-/** 위경도 → Web Mercator 월드 픽셀 (256px 타일, 줌 = 네이버 Static Map level) */
-private fun worldPixel(g: GeoPt, level: Int): Pair<Double, Double> {
-    val n = TILE * (1 shl level)
+/** 위경도 → Web Mercator 월드 픽셀 (256px 타일 기준 줌) */
+private fun worldPixel(g: GeoPt, zoom: Int): Pair<Double, Double> {
+    val n = TILE * (1 shl zoom)
     val x = (g.lon + 180.0) / 360.0 * n
     val r = Math.toRadians(g.lat)
     val y = (1.0 - ln(tan(r) + 1.0 / cos(r)) / PI) / 2.0 * n
@@ -104,12 +105,13 @@ private fun worldPixel(g: GeoPt, level: Int): Pair<Double, Double> {
 
 /**
  * 위경도 → 내장 이미지(네이버 Static Map)의 픽셀 좌표.
+ * 네이버 level L = 256px 타일 줌 L+1 (실제 지도 이미지에 경로를 겹쳐 확인함).
  * 이미지 중심 = center, 1 월드 픽셀 = scale 이미지 픽셀 (scale=2면 2배 해상도)
  */
 private fun imagePixel(g: GeoPt): Offset {
-    val level = MockData.routeMapLevel
-    val (cx, cy) = worldPixel(GeoPt(MockData.routeMapCenterLat, MockData.routeMapCenterLon), level)
-    val (x, y) = worldPixel(g, level)
+    val zoom = MockData.routeMapLevel + NAVER_LEVEL_OFFSET
+    val (cx, cy) = worldPixel(GeoPt(MockData.routeMapCenterLat, MockData.routeMapCenterLon), zoom)
+    val (x, y) = worldPixel(g, zoom)
     val s = MockData.routeMapScale
     return Offset(
         ((x - cx) * s + MockData.routeMapWidth / 2.0).toFloat(),

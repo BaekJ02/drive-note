@@ -9,15 +9,17 @@
 사용법 (프로젝트 루트에서):
     export NAVER_MAP_KEY_ID=...   # 네이버 클라우드 콘솔의 Client ID
     export NAVER_MAP_KEY=...      # Client Secret
+    (환경 변수가 없으면 프로젝트 루트 local.properties의 같은 이름 값을 읽음:
+     NAVER_MAP_KEY_ID=... / NAVER_MAP_KEY=...)
     python3 tools/make_route_map.py            # 지도 받아서 PNG 생성 + MockData 상수 갱신
     python3 tools/make_route_map.py --dry-run  # 계산한 center/level만 출력 (요청 안 함)
 
-API 키는 환경 변수에서만 읽고, 화면·파일 어디에도 출력하지 않는다.
+API 키는 환경 변수 또는 local.properties에서만 읽고, 화면·파일 어디에도 출력하지 않는다.
 
 좌표계:
-    네이버 Static Map은 Web Mercator(EPSG:3857), 256px 타일 기준 줌 = level 이다.
-    scale=2면 같은 영역을 2배 해상도로 받는다 (이미지 크기 = w*2 x h*2).
-    즉 이미지 픽셀 = (월드 픽셀(level) - 월드 픽셀(center)) * scale + 이미지 크기 / 2.
+    네이버 Static Map은 Web Mercator(EPSG:3857)지만, level L이 256px 타일 기준 줌 L+1에 해당한다
+    (실제 이미지에 경로를 겹쳐 확인함). scale=2면 같은 영역을 2배 해상도로 받는다 (이미지 = w*2 x h*2).
+    즉 이미지 픽셀 = (월드 픽셀(level+1) - 월드 픽셀(center)) * scale + 이미지 크기 / 2.
     앱(RouteMap.kt)의 imagePixel()이 같은 식을 쓴다.
 
 실패 처리:
@@ -37,6 +39,8 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOCK = os.path.join(ROOT, "app/src/main/java/com/example/drivenote/MockData.kt")
 OUT = os.path.join(ROOT, "app/src/main/res/drawable-nodpi/route_map.png")
+LOCAL_PROPS = os.path.join(ROOT, "local.properties")
+REFERER = "http://localhost"
 ENDPOINTS = [
     "https://maps.apigw.ntruss.com/map-static/v2/raster",
     "https://naveropenapi.apigw.ntruss.com/map-static/v2/raster",
@@ -45,6 +49,7 @@ W, H = 1024, 466   # 요청 크기 (API 최대 1024). 홈 지도 카드 비율 �
 SCALE = 2          # 고해상도 → 실제 이미지 2048x932
 MARGIN = 0.12      # 경로 바깥 여유 (가로·세로 각 방향 비율)
 MAX_LEVEL = 18
+LEVEL_OFFSET = 1   # 네이버 level L = 256px 타일 줌 L+1 (앱 RouteMap.kt와 같아야 함)
 
 
 def read_route():
@@ -79,7 +84,8 @@ def view(pts):
     dx, dy = max(xs) - min(xs), max(ys) - min(ys)
     level = 0
     for z in range(MAX_LEVEL, -1, -1):
-        if dx * 2 ** z <= W * (1 - 2 * MARGIN) and dy * 2 ** z <= H * (1 - 2 * MARGIN):
+        k = 2 ** (z + LEVEL_OFFSET)
+        if dx * k <= W * (1 - 2 * MARGIN) and dy * k <= H * (1 - 2 * MARGIN):
             level = z
             break
     return lat, lon, level
@@ -96,6 +102,7 @@ def request(url, key_id, key):
     req = urllib.request.Request(url, headers={
         "x-ncp-apigw-api-key-id": key_id,
         "x-ncp-apigw-api-key": key,
+        "Referer": REFERER,  # 콘솔 Application의 Web 서비스 URL에 등록한 주소
     })
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
@@ -116,11 +123,41 @@ def request(url, key_id, key):
     return None, f"HTTP {status} ({ctype or 'Content-Type 없음'}): {msg.strip()}"
 
 
+def read_local_properties():
+    """local.properties의 key=value를 dict로 (없으면 빈 dict). 값은 출력하지 않음."""
+    props = {}
+    try:
+        with open(LOCAL_PROPS, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line[0] in "#!" or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                props[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return props
+
+
+def load_keys():
+    """(key_id, key, 출처). 환경 변수가 우선, 없으면 local.properties."""
+    names = ("NAVER_MAP_KEY_ID", "NAVER_MAP_KEY")
+    env = [os.environ.get(n) for n in names]
+    if all(env):
+        return env[0], env[1], "환경 변수"
+    props = read_local_properties()
+    vals = [env[i] or props.get(n) for i, n in enumerate(names)]
+    if all(vals):
+        src = "local.properties" if not any(env) else "환경 변수 + local.properties"
+        return vals[0], vals[1], src
+    return None, None, None
+
+
 def update_mock(lat, lon, level, img_w, img_h):
     src = open(MOCK, encoding="utf-8").read()
     block = (
         "    // 내장 지도 이미지(res/drawable-nodpi/route_map.png): 네이버 Static Map 요청값\n"
-        "    // tools/make_route_map.py가 자동으로 갱신함. Web Mercator, 256px 타일 기준 줌 = level,\n"
+        "    // tools/make_route_map.py가 자동으로 갱신함. Web Mercator, 256px 타일 기준 줌 = level + 1,\n"
         "    // 이미지 크기 = 요청 크기(w, h) x scale, 이미지 중심 = center\n"
         f"    const val routeMapCenterLat = {lat}\n"
         f"    const val routeMapCenterLon = {lon}\n"
@@ -145,10 +182,11 @@ def main():
     if "--dry-run" in sys.argv:
         return 0
 
-    key_id, key = os.environ.get("NAVER_MAP_KEY_ID"), os.environ.get("NAVER_MAP_KEY")
+    key_id, key, source = load_keys()
     if not key_id or not key:
-        print("실패: 환경 변수 NAVER_MAP_KEY_ID, NAVER_MAP_KEY를 설정해주세요.")
+        print("실패: 환경 변수 또는 local.properties에 NAVER_MAP_KEY_ID, NAVER_MAP_KEY를 설정해주세요.")
         return 1
+    print(f"키 로드: {source}")
 
     query = urllib.parse.urlencode({
         "w": W, "h": H, "center": f"{lon},{lat}", "level": level,
