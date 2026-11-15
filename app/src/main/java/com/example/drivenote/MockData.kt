@@ -38,7 +38,7 @@ data class GeoPt(val lat: Double, val lon: Double)
 data class RouteSegment(val from: Int, val to: Int, val habitId: Int)
 
 object MockData {
-    val userName = "지민"
+    val userName = "김현대"
 
     val lastDrive = DriveSummary("11월 15일 (일) 08:42", "집 → 회사", 34, 14.8)
     val lastDriveArrive = "09:16"

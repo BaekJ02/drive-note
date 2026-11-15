@@ -1,8 +1,6 @@
 package com.example.drivenote
 
 import android.content.Context
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.net.ConnectivityManager
@@ -14,6 +12,7 @@ import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -31,10 +30,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import org.osmdroid.util.MapTileIndex
+import java.net.HttpURLConnection
+import java.net.URL
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.MapTileProviderBase
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -47,6 +51,38 @@ import kotlin.math.min
 
 private const val TAG = "RecentDriveMap"
 private const val TILE_TIMEOUT_MS = 8000L
+private const val PROBE_ZOOM = 12
+private val PROBE_TILES = listOf(3493 to 1587, 3494 to 1587) // 경로 근처(서울 동남부) z12 타일
+private const val TILE_FAIL_LIMIT = 4 // 성공 없이 이만큼 실패하면 바로 일러스트로 전환 (403·네트워크 오류 등)
+
+/** CARTO Positron 밝은 지도 (OpenStreetMap 기본 타일은 사용 정책상 403으로 막힘) */
+private val CartoPositron = XYTileSource(
+    "CartoPositron", 0, 19, 256, ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/light_all/",
+        "https://b.basemaps.cartocdn.com/light_all/",
+        "https://c.basemaps.cartocdn.com/light_all/",
+        "https://d.basemaps.cartocdn.com/light_all/",
+    ),
+    "© OpenStreetMap contributors © CARTO",
+)
+
+/** 앱 시작 시 한 번 호출: osmdroid User-Agent와 캐시 경로(앱 내부 저장소) 설정 */
+fun initOsmdroid(context: Context) {
+    try {
+        Configuration.getInstance().apply {
+            load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+            val version = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrNull() ?: "1.0"
+            userAgentValue = "DriveNote/$version (${context.packageName})"
+            osmdroidBasePath = File(context.filesDir, "osmdroid")
+            osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
+        }
+    } catch (t: Throwable) {
+        Log.w(TAG, "osmdroid 설정 실패", t)
+    }
+}
 private val MapBg = Color(0xFFEDF1F6)
 private val Casing = Color.White
 
@@ -59,37 +95,94 @@ private val Casing = Color.White
 fun RecentDriveMap(routeColor: Color, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var tileLoaded by remember { mutableStateOf(false) }
+    var tileFails by remember { mutableStateOf(0) }
     val mapView = remember {
         if (!hasNetwork(context)) {
             Log.w(TAG, "네트워크 없음 → 지도 일러스트로 대체"); null
         } else try {
-            buildMapView(context, routeColor) { tileLoaded = true }
+            buildMapView(context, routeColor, onTileLoaded = { tileLoaded = true }, onTileFailed = { tileFails++ })
         } catch (t: Throwable) {
             Log.w(TAG, "osmdroid 초기화 실패 → 지도 일러스트로 대체", t); null
         }
     }
     var fallback by remember { mutableStateOf(mapView == null) }
+    // 타일 서버 사전 확인 결과: null = 확인 중
+    var probeOk by remember { mutableStateOf<Boolean?>(if (mapView == null) false else null) }
+
+    // 타일 서버가 403이나 "API KEY REQUIRED" 같은 안내 이미지를 200/403과 함께 보내면
+    // osmdroid는 정상 타일로 그려 버리므로, 지도를 보여 주기 전에 직접 확인한다.
+    if (mapView != null) {
+        LaunchedEffect(Unit) {
+            val ok = withContext(Dispatchers.IO) { probeTileServer(context) }
+            probeOk = ok
+            if (!ok) fallback = true
+        }
+    }
+
+    // 성공한 타일 없이 실패가 쌓이면 바로 대체 (403, DNS 실패 등)
+    if (!fallback && !tileLoaded && tileFails >= TILE_FAIL_LIMIT) {
+        Log.w(TAG, "타일 로딩 실패 ${tileFails}회 → 지도 일러스트로 대체")
+        fallback = true
+    }
 
     // 일정 시간 안에 타일이 하나도 안 오면 일러스트로 대체
     if (mapView != null) {
-        LaunchedEffect(Unit) {
+        LaunchedEffect(probeOk) {
+            if (probeOk != true) return@LaunchedEffect
             delay(TILE_TIMEOUT_MS)
             if (!tileLoaded) { Log.w(TAG, "타일 로딩 실패 → 지도 일러스트로 대체"); fallback = true }
         }
         DisposableEffect(Unit) { onDispose { runCatching { mapView.onDetach() } } }
     }
 
-    Box(modifier.background(MapBg)) {
+    Box(modifier.clipToBounds().background(MapBg)) {
         if (fallback || mapView == null) {
             RouteIllustration(routeColor, Modifier.fillMaxSize())
-        } else {
-            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
-            // OpenStreetMap 저작권 표시 (타일 사용 조건)
-            Text("© OpenStreetMap", fontSize = 14.sp, color = Color(0xFF5F6672),
+        } else if (probeOk == true) {
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize().clipToBounds())
+            // 지도 데이터·타일 저작권 표시 (사용 조건)
+            Text("© OpenStreetMap contributors © CARTO", fontSize = 14.sp, color = Color(0xFF5F6672),
                 modifier = Modifier.align(Alignment.BottomEnd).background(Color.White.copy(alpha = 0.8f))
                     .padding(horizontal = 6.dp, vertical = 2.dp))
         }
     }
+}
+
+/**
+ * 경로 지역의 서로 다른 타일 2장을 받아 본다.
+ * 둘 다 HTTP 200 이미지이고 내용이 서로 달라야 정상. (차단·키 필요 안내 이미지는 모든 타일이 똑같음)
+ */
+private fun probeTileServer(context: Context): Boolean {
+    val userAgent = Configuration.getInstance().userAgentValue ?: context.packageName
+    val bodies = PROBE_TILES.map { (x, y) ->
+        val url = CartoPositron.getTileURLString(MapTileIndex.getTileIndex(PROBE_ZOOM, x, y))
+        val conn = try {
+            (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 4000; readTimeout = 4000
+                setRequestProperty("User-Agent", userAgent)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "타일 확인 실패: $url", t); return false
+        }
+        try {
+            val code = conn.responseCode
+            val type = conn.contentType.orEmpty()
+            if (code != 200 || !type.startsWith("image")) {
+                Log.w(TAG, "타일 서버 응답 이상 → 지도 일러스트로 대체 (HTTP $code, $type)"); return false
+            }
+            conn.inputStream.use { it.readBytes() }
+        } catch (t: Throwable) {
+            Log.w(TAG, "타일 확인 실패 → 지도 일러스트로 대체: ${t.message}"); return false
+        } finally {
+            conn.disconnect()
+        }
+    }
+    if (bodies[0].contentEquals(bodies[1])) {
+        Log.w(TAG, "서로 다른 타일이 같은 이미지 (API 키 필요·차단 안내로 판단) → 지도 일러스트로 대체")
+        return false
+    }
+    Log.i(TAG, "타일 서버 확인 완료")
+    return true
 }
 
 /** 터치를 받지 않는 MapView: 부모(홈 화면 스크롤)로 터치가 그대로 넘어간다 */
@@ -97,26 +190,20 @@ private class StaticMapView(context: Context) : MapView(context) {
     override fun dispatchTouchEvent(event: MotionEvent?): Boolean = false
 }
 
-private fun buildMapView(context: Context, routeColor: Color, onTileLoaded: () -> Unit): MapView {
-    // osmdroid 설정: user agent 필수, 캐시는 앱 전용 폴더 (저장소 권한 불필요)
-    Configuration.getInstance().apply {
-        load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-        userAgentValue = context.packageName
-        osmdroidBasePath = File(context.cacheDir, "osmdroid")
-        osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
-    }
-
+private fun buildMapView(
+    context: Context, routeColor: Color, onTileLoaded: () -> Unit, onTileFailed: () -> Unit,
+): MapView {
     val map = StaticMapView(context)
-    map.setTileSource(TileSourceFactory.MAPNIK)
+    map.setTileSource(CartoPositron)
     map.setMultiTouchControls(false)
     map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
     map.isTilesScaledToDpi = true
-    // 경로가 돋보이도록 지도 타일 채도를 낮춤 (절제된 회색 톤)
-    map.overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0.15f) }))
-
-    // 타일 로딩 성공 감지
+    // 타일 로딩 성공/실패 감지
     map.tileProvider.tileRequestCompleteHandlers.add(Handler(Looper.getMainLooper()) { msg ->
-        if (msg.what == MapTileProviderBase.MAPTILE_SUCCESS_ID) onTileLoaded()
+        when (msg.what) {
+            MapTileProviderBase.MAPTILE_SUCCESS_ID -> onTileLoaded()
+            MapTileProviderBase.MAPTILE_FAIL_ID -> onTileFailed()
+        }
         false
     })
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -205,12 +207,22 @@ private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Uni
 
         // 최근 주행: 지도(60%) + 정보(40%)
         Row(
-            Modifier.fillMaxWidth().height(520.dp).clip(RoundedCornerShape(RADIUS)).background(Surface)
-                .border(1.dp, Line, RoundedCornerShape(RADIUS))
+            Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(RADIUS)).background(Surface)
+                .border(1.dp, Line, RoundedCornerShape(RADIUS)).padding(20.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Column(Modifier.weight(0.6f).fillMaxHeight()) {
-                RecentDriveMap(Accent, Modifier.weight(1f).fillMaxWidth())
-                Row(Modifier.padding(horizontal = 28.dp, vertical = 18.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+            // 지도: 고정 높이 + 둥근 모서리로 잘라서 카드·오른쪽 정보 영역 밖으로 그려지지 않게 함
+            Column(Modifier.weight(0.6f)) {
+                RecentDriveMap(
+                    Accent,
+                    Modifier.fillMaxWidth().height(360.dp).clip(RoundedCornerShape(ITEM_RADIUS)).clipToBounds()
+                )
+                // 범례: 지도 아래 별도 줄 (넘치면 다음 줄로)
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(start = 8.dp, top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     MockData.lastDriveSegments.forEach { seg ->
                         val h = MockData.habits.first { it.id == seg.habitId }
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -221,7 +233,7 @@ private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Uni
                     }
                 }
             }
-            Column(Modifier.weight(0.4f).fillMaxHeight().padding(40.dp)) {
+            Column(Modifier.weight(0.4f).fillMaxHeight().padding(horizontal = 20.dp, vertical = 12.dp)) {
                 Label("최근 주행")
                 Text("${d.date} – ${MockData.lastDriveArrive}", fontSize = SMALL, color = Sub, modifier = Modifier.padding(top = 16.dp))
                 Text(d.route, fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 4.dp))
@@ -231,7 +243,7 @@ private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Uni
                     HomeStat("거리", "${d.km}km", Modifier.weight(1f))
                     HomeStat("개선 필요", "${total}건", Modifier.weight(1f))
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f).heightIn(min = 28.dp))
                 Button(onClick = openReport, modifier = Modifier.height(TOUCH).fillMaxWidth(),
                     shape = RoundedCornerShape(ITEM_RADIUS), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                     Text("리포트 보기", fontSize = BODY, fontWeight = FontWeight.SemiBold)
