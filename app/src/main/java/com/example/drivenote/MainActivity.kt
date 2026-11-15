@@ -25,7 +25,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        initOsmdroid(applicationContext) // 지도 User-Agent·캐시 경로 (지도 생성 전에)
         vehicle = VehicleRepository(this, engine)
         vehicle.start()
         requestSpeedPermissionIfNeeded()

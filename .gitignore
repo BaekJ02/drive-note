@@ -13,3 +13,6 @@ captures/
 
 # macOS
 .DS_Store
+
+# Python
+__pycache__/

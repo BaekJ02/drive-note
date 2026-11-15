@@ -40,7 +40,6 @@ android {
 
 dependencies {
     implementation(libs.pleos.vehicle)
-    implementation(libs.osmdroid.android)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

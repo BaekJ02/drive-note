@@ -214,7 +214,7 @@ private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Uni
         ) {
             // 지도: 고정 높이 + 둥근 모서리로 잘라서 카드·오른쪽 정보 영역 밖으로 그려지지 않게 함
             Column(Modifier.weight(0.6f)) {
-                RecentDriveMap(
+                DriveRouteMap(
                     Accent,
                     Modifier.fillMaxWidth().height(360.dp).clip(RoundedCornerShape(ITEM_RADIUS)).clipToBounds()
                 )
@@ -420,7 +420,8 @@ private fun ReportScreen(trip: TripRecord?) {
                     Text(selected.name, fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 12.dp))
                     Text("발생 위치 · ${selected.location}", fontSize = SMALL, color = Sub, modifier = Modifier.padding(top = 4.dp))
                     // 지도 일러스트 (실제 앱: FusedLocation 좌표를 지도 위에 표시)
-                    RouteMap(selected, Modifier.padding(top = 20.dp).fillMaxWidth().height(280.dp))
+                    DriveRouteMap(Accent, Modifier.padding(top = 20.dp).fillMaxWidth().height(280.dp).clip(RoundedCornerShape(ITEM_RADIUS)),
+                    showAllSegments = false, habit = selected)
                     Row(Modifier.padding(top = 12.dp, bottom = 28.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(32.dp).height(8.dp).clip(CircleShape).background(Accent))
                         Text("주행 경로", fontSize = SMALL, color = Sub, modifier = Modifier.padding(start = 10.dp, end = 32.dp))
@@ -435,51 +436,6 @@ private fun ReportScreen(trip: TripRecord?) {
             }
         }
     }
-}
-
-/** 간단한 지도 일러스트: 연한 도로 격자 + 주행 경로 곡선 + 습관 발생 지점 마커 */
-@Composable
-private fun RouteMap(habit: Habit, modifier: Modifier) {
-    val measurer = rememberTextMeasurer()
-    Canvas(modifier.clip(RoundedCornerShape(ITEM_RADIUS)).background(MapIllustrationBg)) {
-        val w = size.width
-        val h = size.height
-        // 도로망·한강·공원 배경 (홈 대체 지도와 공통)
-        drawMapBase()
-
-        // 주행 경로 (3차 베지어 곡선)
-        val p0 = Offset(w * 0.07f, h * 0.84f)
-        val p1 = Offset(w * 0.38f, h * 0.98f)
-        val p2 = Offset(w * 0.5f, h * 0.02f)
-        val p3 = Offset(w * 0.93f, h * 0.2f)
-        val route = Path().apply { moveTo(p0.x, p0.y); cubicTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y) }
-        drawPath(route, Accent.copy(alpha = 0.25f), style = Stroke(14.dp.toPx(), cap = StrokeCap.Round))
-        drawPath(route, Accent, style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
-
-        // 출발(빈 원)·도착(채운 원)
-        drawCircle(Color.White, 11.dp.toPx(), p0)
-        drawCircle(Accent, 11.dp.toPx(), p0, style = Stroke(4.dp.toPx()))
-        drawCircle(Accent, 12.dp.toPx(), p3)
-        drawCircle(Color.White, 5.dp.toPx(), p3)
-        // 출발·도착 지명
-        drawPlaceLabel(measurer, "시흥동", p0)
-        drawPlaceLabel(measurer, "삼성동", p3)
-
-        // 발생 지점: 경로 위에 count개를 고르게 배치 (습관별로 조금씩 위치가 다르게)
-        repeat(habit.count) { i ->
-            val jitter = (((habit.id * 37 + i * 53) % 7) - 3) * 0.015f
-            val t = ((i + 1f) / (habit.count + 1f) + jitter).coerceIn(0.08f, 0.92f)
-            val pt = bezier(p0, p1, p2, p3, t)
-            drawCircle(Color.Black.copy(alpha = 0.12f), 17.dp.toPx(), pt + Offset(0f, 2.dp.toPx()))
-            drawCircle(Color.White, 16.dp.toPx(), pt)
-            drawCircle(habit.category.color, 11.dp.toPx(), pt)
-        }
-    }
-}
-
-private fun bezier(p0: Offset, p1: Offset, p2: Offset, p3: Offset, t: Float): Offset {
-    val u = 1 - t
-    return p0 * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + p3 * (t * t * t)
 }
 
 // ---------------- 개선 추이 (최근 4주 막대)

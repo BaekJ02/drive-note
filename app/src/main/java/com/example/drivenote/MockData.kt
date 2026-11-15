@@ -72,6 +72,14 @@ object MockData {
         GeoPt(37.50880, 127.06315), // 21 도착 (삼성동)
     )
 
+    // 내장 지도 이미지(res/drawable-nodpi/route_map.png)의 타일 범위 (Web Mercator, 타일 256px)
+    // tools/make_route_map.py가 출력하는 값과 같아야 함. 이미지 좌상단 = (tileX0, tileY0) 타일의 좌상단
+    const val routeMapZoom = 13
+    const val routeMapTileX0 = 6984
+    const val routeMapTileY0 = 3173
+    const val routeMapCols = 9
+    const val routeMapRows = 5
+
     // 습관이 감지된 구간 (홈 지도에 분류 색으로 강조)
     val lastDriveSegments = listOf(
         RouteSegment(1, 3, habitId = 1),   // 급출발·급가속: 시흥동 교차로 출발 직후
