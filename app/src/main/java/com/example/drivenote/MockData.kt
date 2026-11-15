@@ -130,3 +130,139 @@ object MockData {
             "후진 주차할 때 기준점을 먼저 잡고 들어가면 수정 횟수를 줄일 수 있어요.", listOf(2, 2, 1, 1)),
     )
 }
+
+// ---------------- 리포트 탭: 월간 캘린더 + 주행별 상세
+
+/** 리포트 문제 분류별 색 (핀·목록 원) */
+enum class IssueType(val color: Color) {
+    ACCEL(Color(0xFFE8833A)),  // 급출발·급가속
+    BRAKE(Color(0xFFD9443B)),  // 급제동·브레이크 나눠 밟기
+    SIGNAL(Color(0xFF2E9E5B)), // 방향지시등
+    STEER(Color(0xFF8E5BD9)),  // 조향 (보라)
+}
+
+/** 주행 중 감지된 문제 1건: route[from]..route[to] 구간을 색으로 표시하고, 구간 가운데에 번호 핀 */
+data class DriveIssue(
+    val no: Int, val type: IssueType, val title: String, val time: String, val place: String, val tip: String,
+    val from: Int, val to: Int,
+)
+
+data class TripLog(
+    val start: String, val from: String, val to: String, val minutes: Int, val km: Double,
+    val issueCount: Int, // 이 주행의 개선 필요 건수 (목록에 표시하는 대표 문제보다 많을 수 있음)
+    val route: List<GeoPt>, val issues: List<DriveIssue>,
+)
+
+object ReportData {
+    val year = 2026
+    val month = 11
+
+    // 경로: 시흥동 → 삼성동(홈 경로), 반대 방향, 시흥동 → 판교
+    private val toWork = MockData.lastDriveRoute
+    private val toHome = MockData.lastDriveRoute.reversed()
+    private val toPangyo = listOf(
+        GeoPt(37.41933, 127.10171), GeoPt(37.41500, 127.10050), GeoPt(37.40900, 127.09950),
+        GeoPt(37.40300, 127.10000), GeoPt(37.39800, 127.10400), GeoPt(37.39480, 127.11120),
+    )
+
+    private val fromPangyo = toPangyo.reversed()
+
+    // 장소별 경로 구간 (출근 방향 인덱스 기준, 퇴근 방향은 뒤집어서 사용)
+    private val places = mapOf(
+        "시흥사거리" to (1 to 3), "대왕판교로" to (4 to 6), "헌릉로" to (7 to 9), "헌릉IC" to (9 to 11),
+        "분당수서로" to (12 to 15), "수서IC" to (15 to 17), "대치동" to (16 to 18), "삼성동" to (19 to 21),
+    )
+    private val pangyoPlaces = mapOf("시흥동 교차로" to (0 to 1), "대왕판교로" to (1 to 3), "판교IC" to (3 to 5))
+
+    private val tips = mapOf(
+        "급출발" to "가속 페달을 2초 정도에 걸쳐 천천히 밟아 보세요.",
+        "급가속" to "합류할 때는 미리 속도를 조금씩 올려 두면 급하게 밟지 않아도 돼요.",
+        "브레이크 나눠 밟기" to "한 번에 일정한 힘으로 밟으면 덜 울렁거려요.",
+        "급제동" to "앞차와 거리를 조금 더 두면 여유 있게 멈출 수 있어요.",
+        "정차 직전 급제동" to "멈추기 직전에 브레이크를 살짝 풀어 주면 부드럽게 설 수 있어요.",
+        "방향지시등 늦게 켬" to "차로를 바꾸기 3초 전쯤 켜 주세요.",
+        "방향지시등 미점등" to "진출로에 들어가기 전에 방향지시등을 먼저 켜 보세요.",
+        "핸들 과다 조작" to "핸들을 조금 덜 돌려도 충분히 회전할 수 있어요.",
+        "차로 내 흔들림" to "시선을 멀리 두면 차로 가운데를 더 쉽게 유지할 수 있어요.",
+    )
+    private val typeOf = mapOf(
+        "급출발" to IssueType.ACCEL, "급가속" to IssueType.ACCEL,
+        "브레이크 나눠 밟기" to IssueType.BRAKE, "급제동" to IssueType.BRAKE, "정차 직전 급제동" to IssueType.BRAKE,
+        "방향지시등 늦게 켬" to IssueType.SIGNAL, "방향지시등 미점등" to IssueType.SIGNAL,
+        "핸들 과다 조작" to IssueType.STEER, "차로 내 흔들림" to IssueType.STEER,
+    )
+
+    /** 문제 목록 생성: (제목, 장소) 순서대로 번호를 붙이고, 시간은 경로상 위치로 계산 (explicit이 있으면 그 시간) */
+    private fun trip(
+        start: String, from: String, to: String, minutes: Int, km: Double, count: Int, route: List<GeoPt>,
+        vararg issues: Pair<String, String>, times: List<String>? = null,
+    ): TripLog {
+        val last = route.lastIndex
+        val list = issues.mapIndexed { i, (title, place) ->
+            // 반대 방향 경로는 구간 인덱스를 뒤집음
+            fun rev(r: Pair<Int, Int>) = (last - r.second) to (last - r.first)
+            val (a, b) = when (route) {
+                toHome -> rev(places.getValue(place))
+                toPangyo -> pangyoPlaces.getValue(place)
+                fromPangyo -> rev(pangyoPlaces.getValue(place))
+                else -> places.getValue(place)
+            }
+            val (h, m) = start.split(":").map(String::toInt)
+            val at = h * 60 + m + minutes * a / last
+            val time = times?.get(i) ?: "%02d:%02d".format(at / 60, at % 60)
+            DriveIssue(i + 1, typeOf.getValue(title), title, time, place, tips.getValue(title), a, b)
+        }
+        return TripLog(start, from, to, minutes, km, count, route, list)
+    }
+
+    /** 날짜의 주행 목록 (목업은 2026년 11월만) */
+    fun tripsOn(date: java.time.LocalDate): List<TripLog> =
+        if (date.year == year && date.monthValue == month) trips[date.dayOfMonth].orEmpty() else emptyList()
+
+    /** 11월 날짜 → 그날 주행 목록 */
+    val trips: Map<Int, List<TripLog>> = mapOf(
+        2 to listOf(
+            trip("08:35", "시흥동", "삼성동", 36, 14.8, 5, toWork, "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "대치동"),
+            trip("18:40", "삼성동", "시흥동", 44, 15.2, 3, toHome, "급제동" to "삼성동", "차로 내 흔들림" to "헌릉로"),
+        ),
+        3 to listOf(
+            trip("08:50", "시흥동", "삼성동", 38, 14.8, 6, toWork, "급가속" to "헌릉IC", "급제동" to "수서IC", "방향지시등 미점등" to "삼성동"),
+            trip("19:10", "삼성동", "시흥동", 40, 15.2, 4, toHome, "브레이크 나눠 밟기" to "분당수서로", "급출발" to "대치동", "핸들 과다 조작" to "시흥사거리"),
+        ),
+        4 to listOf(
+            trip("08:40", "시흥동", "삼성동", 33, 14.8, 4, toWork, "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로"),
+        ),
+        6 to listOf(
+            trip("08:45", "시흥동", "삼성동", 35, 14.8, 5, toWork, "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "수서IC", "급제동" to "삼성동"),
+            trip("18:25", "삼성동", "시흥동", 42, 15.2, 3, toHome, "급출발" to "삼성동", "차로 내 흔들림" to "대왕판교로"),
+        ),
+        9 to listOf(
+            trip("10:30", "시흥동", "판교", 17, 7.9, 2, toPangyo, "급가속" to "대왕판교로", "방향지시등 늦게 켬" to "판교IC"),
+            trip("15:20", "판교", "시흥동", 19, 7.9, 1, fromPangyo, "정차 직전 급제동" to "시흥동 교차로"),
+        ),
+        10 to listOf(
+            trip("08:38", "시흥동", "삼성동", 37, 14.8, 6, toWork, "급출발" to "시흥사거리", "급가속" to "헌릉IC", "브레이크 나눠 밟기" to "분당수서로"),
+            trip("18:50", "삼성동", "시흥동", 39, 15.2, 4, toHome, "방향지시등 미점등" to "수서IC", "정차 직전 급제동" to "시흥사거리"),
+        ),
+        11 to listOf(
+            trip("08:44", "시흥동", "삼성동", 34, 14.8, 5, toWork, "브레이크 나눠 밟기" to "분당수서로", "핸들 과다 조작" to "삼성동"),
+            trip("18:30", "삼성동", "시흥동", 41, 15.2, 3, toHome, "급출발" to "대치동", "급제동" to "헌릉로", "방향지시등 늦게 켬" to "시흥사거리"),
+        ),
+        12 to listOf(
+            trip("08:41", "시흥동", "삼성동", 35, 14.8, 4, toWork, "급가속" to "대왕판교로", "방향지시등 늦게 켬" to "대치동"),
+            trip("19:05", "삼성동", "시흥동", 43, 15.2, 4, toHome, "브레이크 나눠 밟기" to "분당수서로", "급제동" to "헌릉IC"),
+        ),
+        13 to listOf(
+            trip("08:47", "시흥동", "삼성동", 36, 14.8, 5, toWork, "급출발" to "시흥사거리", "급제동" to "수서IC", "차로 내 흔들림" to "헌릉로"),
+            trip("18:35", "삼성동", "시흥동", 40, 15.2, 2, toHome, "정차 직전 급제동" to "시흥사거리", "방향지시등 미점등" to "대치동"),
+        ),
+        15 to listOf(
+            // 홈 '최근 주행'과 같은 주행 (구간도 홈 지도와 동일)
+            trip("08:42", "시흥동", "삼성동", 34, 14.8, 7, toWork,
+                "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "대치동",
+                times = listOf("08:44", "09:05", "09:12")),
+            trip("18:20", "삼성동", "시흥동", 41, 15.2, 4, toHome, "급제동" to "삼성동", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "헌릉IC"),
+            trip("20:05", "시흥동", "판교", 18, 7.9, 1, toPangyo, "급출발" to "시흥동 교차로"),
+        ),
+    )
+}

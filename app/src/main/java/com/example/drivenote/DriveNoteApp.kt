@@ -38,7 +38,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import androidx.compose.ui.text.style.TextAlign
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.YearMonth
 import java.util.Date
 import java.util.Locale
 
@@ -51,6 +54,7 @@ private val Line = Color(0xFFE2E5EA)
 private val Accent = Color(0xFF1A73E8)
 private val Danger = Color(0xFFD9443B)
 private val Positive = Color(0xFF2E9E5B)
+private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경
 
 private val TOUCH = 100.dp          // 차량 화면용 최소 터치 영역
 private val SCREEN_PAD = 40.dp      // 콘텐츠 영역 바깥 여백
@@ -108,8 +112,8 @@ fun DriveNoteApp(vehicle: VehicleRepository, engine: CoachingEngine, speak: (Str
                     SideRail(tab, hasNewReport) { tab = it; if (it == Tab.REPORT) hasNewReport = false }
                     Box(Modifier.weight(1f).fillMaxHeight().padding(SCREEN_PAD)) {
                         when (tab) {
-                            Tab.HOME -> HomeScreen(focus) { tab = Tab.REPORT; hasNewReport = false }
-                            Tab.REPORT -> ReportScreen(trip)
+                            Tab.HOME -> HomeScreen { tab = Tab.REPORT; hasNewReport = false }
+                            Tab.REPORT -> ReportScreen()
                             Tab.TREND -> TrendScreen(focus)
                             Tab.SETTINGS -> SettingsScreen(voiceOn, { voiceOn = it }, focus)
                         }
@@ -194,7 +198,7 @@ private fun CategoryTag(c: Category) {
 
 // ---------------- 홈
 @Composable
-private fun HomeScreen(focus: List<Int>, openReport: () -> Unit) {
+private fun HomeScreen(openReport: () -> Unit) {
     val d = MockData.lastDrive
     val today = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREAN).format(Date()) }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
@@ -228,20 +232,12 @@ private fun HomeScreen(focus: List<Int>, openReport: () -> Unit) {
             )
             FloatingDriveBar(openReport, Modifier.align(Alignment.BottomCenter))
         }
-
-        // 이번 주 한 줄 요약
-        val focusNames = MockData.habits.filter { it.id in focus }.joinToString(", ") { FOCUS_SHORT_NAMES[it.id] ?: it.name }
-        Text("이번 주 31건 · 지난주보다 6건 줄었어요 · 집중 항목: $focusNames", fontSize = SMALL, color = Sub, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
 private val HOME_BAR_HEIGHT = 108.dp
 private val HOME_BAR_MARGIN = 24.dp
 private val HOME_BAR_SHAPE = RoundedCornerShape(28.dp)
-
-// 홈 한 줄 요약에 쓰는 집중 항목 짧은 이름 (없으면 습관 이름 그대로)
-private val FOCUS_SHORT_NAMES = mapOf(2 to "브레이크 나눠 밟기", 3 to "정차 직전 급제동")
 
 /**
  * 지도 위에 떠 있는 최근 주행 정보 바.
@@ -391,54 +387,142 @@ private fun SpeakerIcon(color: Color, modifier: Modifier) {
 
 // ---------------- 리포트 (목록 + 상세, 2단)
 @Composable
-private fun ReportScreen(trip: TripRecord?) {
-    // 이번 주행에서 감지된 기록이 있으면 그걸, 없으면 목업 데이터를 보여 줌
-    val live = trip != null && trip.events.isNotEmpty()
-    val habits = remember(trip) { if (live) TripReport.habits(trip!!) else MockData.habits }
-    val d = remember(trip) { if (live) TripReport.summary(trip!!) else MockData.lastDrive }
-    var selected by remember(habits) { mutableStateOf(habits.first()) }
+private fun ReportScreen() {
+    val firstMonth = remember { YearMonth.of(ReportData.year, ReportData.month) }
+    var month by remember { mutableStateOf(firstMonth) }
+    var day by remember { mutableStateOf(LocalDate.of(ReportData.year, ReportData.month, 15)) }
+    val trips = ReportData.tripsOn(day)
+    var tripIndex by remember(day) { mutableIntStateOf(0) }
+    val trip = trips.getOrNull(tripIndex)
+
     Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
-        ScreenHeader("주행 리포트", "${d.date} · ${d.route} · ${d.minutes}분 · ${d.km}km")
+        Text("주행 리포트", fontSize = 60.sp, fontWeight = FontWeight.Bold, color = Ink)
         Row(horizontalArrangement = Arrangement.spacedBy(GAP), modifier = Modifier.fillMaxSize()) {
+            // 왼쪽: 월간 캘린더 + 그날 주행 목록
+            Panel(Modifier.width(460.dp).fillMaxHeight()) {
+                MonthCalendar(month, day, onMonth = { month = it }, onDay = { day = it })
+                Box(Modifier.padding(vertical = 20.dp).fillMaxWidth().height(1.dp).background(Line))
+                Label("${day.monthValue}월 ${day.dayOfMonth}일 · 주행 ${trips.size}회")
+                if (trips.isEmpty()) {
+                    Text("이 날은 주행 기록이 없어요", fontSize = SMALL, color = Sub, modifier = Modifier.padding(top = 24.dp))
+                } else {
+                    LazyColumn(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(trips.size) { i -> TripRow(trips[i], i == tripIndex) { tripIndex = i } }
+                    }
+                }
+            }
+            // 오른쪽: 선택한 주행 상세
             Panel(Modifier.weight(1f).fillMaxHeight()) {
-                Label("개선이 필요한 항목 ${habits.size}개")
-                Spacer(Modifier.height(16.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(habits) { h ->
-                        val sel = h.id == selected.id
-                        Row(
-                            Modifier.fillMaxWidth().heightIn(min = TOUCH).clip(RoundedCornerShape(ITEM_RADIUS))
-                                .background(if (sel) Accent.copy(alpha = 0.10f) else Color.Transparent)
-                                .clickable { selected = h }.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                if (trip == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("선택한 날의 주행 기록이 없어요", fontSize = BODY, color = Sub)
+                    }
+                } else {
+                    TripDetail(trip)
+                }
+            }
+        }
+    }
+}
+
+/** 월간 캘린더: ‹ 2026년 11월 › · 요일 헤더 · 7열 날짜 (주행 있는 날 파란 점, 선택한 날 파란 배경) */
+@Composable
+private fun MonthCalendar(month: YearMonth, selected: LocalDate, onMonth: (YearMonth) -> Unit, onDay: (LocalDate) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        CalendarArrow("‹") { onMonth(month.minusMonths(1)) }
+        Text("${month.year}년 ${month.monthValue}월", fontSize = BODY, fontWeight = FontWeight.Bold, color = Ink,
+            textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+        CalendarArrow("›") { onMonth(month.plusMonths(1)) }
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)) {
+        listOf("일", "월", "화", "수", "목", "금", "토").forEach {
+            Text(it, fontSize = 22.sp, color = Sub, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+        }
+    }
+    val lead = month.atDay(1).dayOfWeek.value % 7 // 일요일 시작
+    val cells = (List(lead) { null } + (1..month.lengthOfMonth()).toList()).chunked(7)
+    cells.forEach { week ->
+        Row(Modifier.fillMaxWidth()) {
+            (0 until 7).forEach { i ->
+                val d = week.getOrNull(i)
+                Box(Modifier.weight(1f).height(56.dp), contentAlignment = Alignment.Center) {
+                    if (d != null) {
+                        val date = month.atDay(d)
+                        val sel = date == selected
+                        val has = ReportData.tripsOn(date).isNotEmpty()
+                        Column(
+                            Modifier.size(50.dp).clip(RoundedCornerShape(14.dp)).background(if (sel) Accent else Color.Transparent)
+                                .clickable { onDay(date) },
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                         ) {
-                            CategoryTag(h.category); Spacer(Modifier.width(16.dp))
-                            Text(h.name, fontSize = BODY, color = Ink, modifier = Modifier.weight(1f),
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
-                            Text("${h.count}회", fontSize = BODY, color = if (sel) Accent else Sub, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(start = 16.dp))
+                            Text("$d", fontSize = 24.sp, color = if (sel) Color.White else Ink,
+                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal, lineHeight = 26.sp)
+                            Box(Modifier.padding(top = 3.dp).size(6.dp).clip(CircleShape)
+                                .background(if (!has) Color.Transparent else if (sel) Color.White else Accent))
                         }
                     }
                 }
             }
-            Panel(Modifier.weight(1.2f).fillMaxHeight()) {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    CategoryTag(selected.category)
-                    Text(selected.name, fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 12.dp))
-                    Text("발생 위치 · ${selected.location}", fontSize = SMALL, color = Sub, modifier = Modifier.padding(top = 4.dp))
-                    // 지도 일러스트 (실제 앱: FusedLocation 좌표를 지도 위에 표시)
-                    DriveRouteMap(Accent, Modifier.padding(top = 20.dp).fillMaxWidth().height(280.dp).clip(RoundedCornerShape(ITEM_RADIUS)),
-                    showAllSegments = false, habit = selected)
-                    Row(Modifier.padding(top = 12.dp, bottom = 28.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(32.dp).height(8.dp).clip(CircleShape).background(Accent))
-                        Text("주행 경로", fontSize = SMALL, color = Sub, modifier = Modifier.padding(start = 10.dp, end = 32.dp))
-                        Box(Modifier.size(20.dp).clip(CircleShape).background(selected.category.color))
-                        Text("발생 지점 ${selected.count}곳", fontSize = SMALL, color = Sub, modifier = Modifier.padding(start = 10.dp))
+        }
+    }
+}
+
+@Composable
+private fun CalendarArrow(text: String, onClick: () -> Unit) {
+    Box(Modifier.size(56.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Text(text, fontSize = 40.sp, color = Ink)
+    }
+}
+
+/** 주행 목록 한 행: 시간 | 출발 → 도착 / 34분 · 14.8km | 7건 */
+@Composable
+private fun TripRow(t: TripLog, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(ITEM_RADIUS))
+            .background(if (selected) SelectedBg else Color.Transparent)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(t.start, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+            Text("${t.from} → ${t.to}", fontSize = SMALL, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${t.minutes}분 · ${t.km}km", fontSize = 22.sp, color = Sub)
+        }
+        Text("${t.issueCount}건", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+    }
+}
+
+/** 선택한 주행 상세: 요약 줄 · 지도(번호 핀) · 문제 목록 (누르면 지도가 그 핀으로 이동) */
+@Composable
+private fun TripDetail(t: TripLog) {
+    var focus by remember(t) { mutableStateOf<MapFocus?>(null) }
+    var seq by remember { mutableIntStateOf(0) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("${t.start} ${t.from} → ${t.to}", fontSize = HEADLINE, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f))
+        Text("${t.minutes}분 · ${t.km}km · 개선 ${t.issueCount}건", fontSize = SMALL, color = Sub)
+    }
+    HomeRouteMap(
+        Accent, bottomInset = 0.dp,
+        modifier = Modifier.padding(top = 20.dp).fillMaxWidth().height(380.dp).clip(RoundedCornerShape(ITEM_RADIUS)),
+        overlay = tripRouteOverlay(t, Accent), focus = focus,
+    )
+    LazyColumn(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(t.issues.size) { i ->
+            val issue = t.issues[i]
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(ITEM_RADIUS))
+                    .clickable { focus = MapFocus(issuePoint(t, issue), ++seq) }
+                    .padding(horizontal = 12.dp, vertical = 14.dp),
+            ) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(issue.type.color), contentAlignment = Alignment.Center) {
+                    Text("${issue.no}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Column(Modifier.padding(start = 20.dp)) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(issue.title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("${issue.time} · ${issue.place}", fontSize = 22.sp, color = Sub, modifier = Modifier.padding(start = 14.dp, bottom = 2.dp))
                     }
-                    Label("왜 고치면 좋을까요?")
-                    Text(selected.why, fontSize = BODY, color = Ink, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
-                    Label("이렇게 해 보세요", Accent)
-                    Text(selected.tip, fontSize = BODY, color = Ink, modifier = Modifier.padding(top = 8.dp))
+                    Text(issue.tip, fontSize = SMALL, color = Ink, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }

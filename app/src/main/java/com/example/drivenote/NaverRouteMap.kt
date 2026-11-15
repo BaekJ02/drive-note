@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ import com.naver.maps.map.NaverMapOptions
 import com.naver.maps.map.NaverMapSdk
 import com.naver.maps.map.overlay.Marker
 import com.naver.maps.map.overlay.MultipartPathOverlay
+import com.naver.maps.map.overlay.Overlay
 import com.naver.maps.map.overlay.OverlayImage
 import kotlin.math.roundToInt
 
@@ -48,13 +50,18 @@ private const val TAG = "HomeMap"
 private var naverSdkFailed = false
 
 /**
- * 홈 최근 주행 지도.
+ * 최근 주행 지도 (홈, 리포트 상세).
  * 1순위: 네이버 지도 SDK(Dynamic Map). 키가 없거나, 네트워크가 없거나, 인증 실패(401/429/800 등)가
  * 감지되면 2순위: 내장 이미지 지도(드래그·핀치 확대)로 자동 대체.
  */
 @Composable
-fun HomeRouteMap(routeColor: Color, bottomInset: Dp, modifier: Modifier = Modifier) {
+fun HomeRouteMap(
+    routeColor: Color, bottomInset: Dp, modifier: Modifier = Modifier,
+    overlay: RouteOverlay? = null, // null이면 홈 '최근 주행' 경로
+    focus: MapFocus? = null,       // 이 지점으로 카메라 이동
+) {
     val context = LocalContext.current
+    val ov = overlay ?: homeRouteOverlay(routeColor)
     var useSdk by remember {
         val reason = when {
             naverSdkFailed -> "이전에 실패"
@@ -66,13 +73,13 @@ fun HomeRouteMap(routeColor: Color, bottomInset: Dp, modifier: Modifier = Modifi
         mutableStateOf(reason == null)
     }
     if (useSdk) {
-        NaverRouteMap(routeColor, bottomInset, modifier) { reason ->
+        NaverRouteMap(routeColor, bottomInset, modifier, ov, focus) { reason ->
             Log.w(TAG, "네이버 지도 SDK 실패 → 내장 이미지로 대체: $reason")
             naverSdkFailed = true
             useSdk = false
         }
     } else {
-        DriveRouteMap(routeColor, modifier, bottomInset = bottomInset, interactive = true)
+        DriveRouteMap(routeColor, modifier, bottomInset = bottomInset, interactive = true, overlay = overlay, focus = focus)
     }
 }
 
@@ -89,7 +96,9 @@ private fun hasNetwork(context: Context): Boolean {
 }
 
 @Composable
-private fun NaverRouteMap(routeColor: Color, bottomInset: Dp, modifier: Modifier, onFailed: (String) -> Unit) {
+private fun NaverRouteMap(
+    routeColor: Color, bottomInset: Dp, modifier: Modifier, ov: RouteOverlay, focus: MapFocus?, onFailed: (String) -> Unit,
+) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -98,7 +107,7 @@ private fun NaverRouteMap(routeColor: Color, bottomInset: Dp, modifier: Modifier
 
     // 경로 전체가 보이는 처음 카메라: 아래 떠 있는 정보 바만큼 하단 여백
     fun fitRoute(): CameraUpdate {
-        val b = LatLngBounds.Builder().apply { MockData.lastDriveRoute.forEach { include(LatLng(it.lat, it.lon)) } }.build()
+        val b = LatLngBounds.Builder().apply { ov.route.forEach { include(LatLng(it.lat, it.lon)) } }.build()
         with(density) {
             val pad = 56.dp.roundToPx()
             return CameraUpdate.fitBounds(b, pad, 72.dp.roundToPx(), pad, (bottomInset + 32.dp).roundToPx())
@@ -153,12 +162,27 @@ private fun NaverRouteMap(routeColor: Color, bottomInset: Dp, modifier: Modifier
                     // 네이버 로고(필수 표시)가 정보 바에 가리지 않게 위로
                     with(density) { setLogoMargin(16.dp.roundToPx(), 0, 0, (bottomInset + 12.dp).roundToPx()) }
                 }
-                addRouteOverlays(m, routeColor, density.density)
-                mapView.post { m.moveCamera(fitRoute()) } // 뷰 크기가 정해진 뒤 맞춤
                 m.addOnCameraChangeListener { reason, _ -> if (reason == CameraUpdate.REASON_GESTURE) moved = true }
             }
             mapView
         }, modifier = Modifier.fillMaxSize())
+
+        // 경로(주행)가 바뀌면 오버레이를 다시 그리고 전체가 보이게 맞춤
+        LaunchedEffect(map, ov) {
+            val m = map ?: return@LaunchedEffect
+            val added = addRouteOverlays(m, ov, routeColor, density.density)
+            mapView.post { m.moveCamera(fitRoute()) } // 뷰 크기가 정해진 뒤 맞춤
+            moved = false
+            try { kotlinx.coroutines.awaitCancellation() } finally { added.forEach { it.map = null } }
+        }
+        // 문제 항목 선택: 그 지점으로 확대·이동
+        LaunchedEffect(map, focus) {
+            val m = map ?: return@LaunchedEffect
+            val f = focus ?: return@LaunchedEffect
+            m.moveCamera(CameraUpdate.scrollAndZoomTo(LatLng(f.at.lat, f.at.lon), maxOf(m.cameraPosition.zoom, 14.0))
+                .animate(CameraAnimation.Easing))
+            moved = true
+        }
 
         if (moved) {
             MapResetButton(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
@@ -169,13 +193,12 @@ private fun NaverRouteMap(routeColor: Color, bottomInset: Dp, modifier: Modifier
     }
 }
 
-/** 경로(구간별 색, 같은 굵기) + 출발·도착 마커 */
-private fun addRouteOverlays(map: NaverMap, routeColor: Color, density: Float) {
-    val route = MockData.lastDriveRoute.map { LatLng(it.lat, it.lon) }
-    val parts = routeParts(routeColor)
-    MultipartPathOverlay().apply {
-        coordParts = parts.map { (from, to, _) -> route.subList(from, to + 1) }
-        colorParts = parts.map { (_, _, c) ->
+/** 경로(구간별 색, 같은 굵기) + 출발·도착 마커 + 번호 핀. 추가한 오버레이 목록을 돌려줌 (지울 때 사용) */
+private fun addRouteOverlays(map: NaverMap, ov: RouteOverlay, routeColor: Color, density: Float): List<Overlay> {
+    val route = ov.route.map { LatLng(it.lat, it.lon) }
+    val path = MultipartPathOverlay().apply {
+        coordParts = ov.parts.map { (from, to, _) -> route.subList(from, to + 1) }
+        colorParts = ov.parts.map { (_, _, c) ->
             val argb = c.toArgb()
             MultipartPathOverlay.ColorPart(argb, android.graphics.Color.WHITE, argb, android.graphics.Color.WHITE)
         }
@@ -184,8 +207,28 @@ private fun addRouteOverlays(map: NaverMap, routeColor: Color, density: Float) {
         this.map = map
     }
     // 출발: 흰 원 + 테두리, 도착: 흰 테두리의 채운 원
-    marker(route.first(), circleBitmap(11f, density, routeColor.toArgb(), filled = false), map)
-    marker(route.last(), circleBitmap(13f, density, routeColor.toArgb(), filled = true), map)
+    val start = marker(route.first(), circleBitmap(11f, density, routeColor.toArgb(), filled = false), map)
+    val end = marker(route.last(), circleBitmap(13f, density, routeColor.toArgb(), filled = true), map)
+    val pins = ov.pins.map { p ->
+        marker(LatLng(p.at.lat, p.at.lon), pinBitmap(p.no, p.color.toArgb(), density), map).apply { zIndex = 10 + p.no }
+    }
+    return listOf(path, start, end) + pins
+}
+
+/** 번호 핀: 흰 테두리 원 안에 흰 숫자 */
+private fun pinBitmap(no: Int, color: Int, density: Float): Bitmap {
+    val r = 16 * density
+    val size = (r * 2).roundToInt() + 2
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = android.graphics.Canvas(bmp)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    val cx = size / 2f
+    p.color = android.graphics.Color.WHITE; c.drawCircle(cx, cx, r, p)
+    p.color = color; c.drawCircle(cx, cx, r - 3 * density, p)
+    p.color = android.graphics.Color.WHITE; p.textSize = 15 * density; p.textAlign = Paint.Align.CENTER
+    p.typeface = android.graphics.Typeface.DEFAULT_BOLD
+    c.drawText(no.toString(), cx, cx - (p.ascent() + p.descent()) / 2, p)
+    return bmp
 }
 
 private fun marker(at: LatLng, bmp: Bitmap, map: NaverMap) = Marker().apply {
