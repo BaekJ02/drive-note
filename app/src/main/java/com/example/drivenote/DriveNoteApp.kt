@@ -11,7 +11,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -74,7 +79,10 @@ private val DangerBg = Color(0xFFFCE8E6)   // 연한 빨강 배지 배경
 private val NeutralBg = Color(0xFFF1F3F4)  // 회색 배지 배경
 private val IconGray = Color(0xFF3C4149)   // 흰 원형 버튼 아이콘
 private val ChartBg = Color(0xFFF6F7F9)    // 비교 그래프 배경
-private val RecommendGray = Color(0xFF9AA0A6) // 비교 그래프 '권장' 선
+private val RecommendGray = Color(0xFF8A9099) // 비교 그래프 '권장' 선
+private val ChartBorder = Color(0xFFE6E8EC)   // 비교 그래프 박스 테두리
+private val ChartGrid = Color(0xFFE3E6EA)     // 비교 그래프 가로 보조선
+private val ChartLabel = Color(0xFF9AA0A6)    // 비교 그래프 단위·x축 라벨
 
 private val TOUCH = 100.dp          // 차량 화면용 최소 터치 영역
 private val SCREEN_PAD = 40.dp      // 콘텐츠 영역 바깥 여백
@@ -733,7 +741,7 @@ private fun ComparisonView(c: Comparison, color: Color, modifier: Modifier = Mod
             }
         }
         if (c is Comparison.Chart) {
-            Text(boldMarkup(c.summary), fontSize = SMALL, color = Ink, modifier = Modifier.padding(top = 12.dp))
+            Text(boldMarkup(c.summary), fontSize = 28.sp, color = Ink, modifier = Modifier.padding(top = 14.dp))
         }
     }
 }
@@ -745,40 +753,83 @@ private fun boldMarkup(text: String) = buildAnnotatedString {
     }
 }
 
-/** 내 운전(분류 색 실선 4dp) vs 권장(회색 점선 3dp). 좌상단 단위·범례, 아래 x축(초) 라벨 */
+/**
+ * 내 운전 vs 권장 꺾은선 (흰 박스, 가로 보조선 5줄).
+ * 내 운전: 분류 색 3.5dp 곡선 + 은은한 빛번짐 + 아래로 옅어지는 면. 권장: 회색 2.5dp 점선 곡선.
+ */
 @Composable
 private fun CompareChart(c: Comparison.Chart, color: Color) {
     val measurer = rememberTextMeasurer()
-    Column(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(16.dp)).background(ChartBg).padding(16.dp)) {
+    Column(
+        Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(20.dp)).background(Color.White)
+            .border(1.dp, ChartBorder, RoundedCornerShape(20.dp)).padding(20.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(c.unit, fontSize = 18.sp, color = Sub)
-            Spacer(Modifier.width(24.dp))
-            LegendLine(color, dashed = false); Text("내 운전", fontSize = 18.sp, color = Ink, modifier = Modifier.padding(start = 6.dp, end = 18.dp))
-            LegendLine(RecommendGray, dashed = true); Text("권장", fontSize = 18.sp, color = Ink, modifier = Modifier.padding(start = 6.dp))
+            Text(c.unit, fontSize = 18.sp, color = ChartLabel)
+            Spacer(Modifier.weight(1f))
+            LegendLine(color, dashed = false); Text("내 운전", fontSize = 18.sp, color = IconGray, modifier = Modifier.padding(start = 8.dp, end = 20.dp))
+            LegendLine(RecommendGray, dashed = true); Text("권장", fontSize = 18.sp, color = IconGray, modifier = Modifier.padding(start = 8.dp))
         }
-        Canvas(Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp)) {
+        Canvas(Modifier.fillMaxWidth().weight(1f).padding(top = 10.dp)) {
             val labelH = 26.dp.toPx()
             val plotTop = 6.dp.toPx(); val plotBottom = size.height - labelH
-            val side = 20.dp.toPx()
+            val side = 16.dp.toPx()
             val n = c.mine.size
             val tEnd = ComparisonData.T_START + (n - 1) * ComparisonData.T_STEP
             fun x(t: Float) = side + (t - ComparisonData.T_START) / (tEnd - ComparisonData.T_START) * (size.width - 2 * side)
             fun y(v: Float) = plotBottom - (v - c.yMin) / (c.yMax - c.yMin) * (plotBottom - plotTop)
-            fun path(vs: List<Float>) = Path().apply {
-                vs.forEachIndexed { i, v -> val px = x(ComparisonData.T_START + i * ComparisonData.T_STEP); if (i == 0) moveTo(px, y(v)) else lineTo(px, y(v)) }
+            fun points(vs: List<Float>) = vs.mapIndexed { i, v -> Offset(x(ComparisonData.T_START + i * ComparisonData.T_STEP), y(v)) }
+
+            // 가로 보조선 5줄 (0, 25, 50, 75, 100%)
+            for (k in 0..4) {
+                val gy = plotBottom - (plotBottom - plotTop) * k / 4f
+                drawLine(ChartGrid, Offset(0f, gy), Offset(size.width, gy), strokeWidth = 1.dp.toPx())
             }
-            // 기준선 (값 0)
-            val zero = y(0f.coerceIn(c.yMin, c.yMax))
-            drawLine(Line, Offset(side, zero), Offset(size.width - side, zero), strokeWidth = 1.dp.toPx())
-            drawPath(path(c.recommended), RecommendGray, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 8.dp.toPx()))))
-            drawPath(path(c.mine), color, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+            val mine = points(c.mine)
+            fun smooth(pts: List<Offset>) = smoothPath(pts, plotTop, plotBottom)
+            val minePath = smooth(mine)
+            // 선 아래 면: 분류 색 22% → 바닥 0%
+            val area = smooth(mine).apply { lineTo(mine.last().x, plotBottom); lineTo(mine.first().x, plotBottom); close() }
+            drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f)), startY = plotTop, endY = plotBottom))
+
+            // 권장: 회색 점선 곡선
+            drawPath(smooth(points(c.recommended)), RecommendGray, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round,
+                join = StrokeJoin.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 8.dp.toPx()))))
+
+            // 내 운전: 빛번짐(같은 색 30%, 10dp, 흐림) → 본선 3.5dp
+            drawIntoCanvas { canvas ->
+                val glow = androidx.compose.ui.graphics.Paint().asFrameworkPaint().apply {
+                    isAntiAlias = true
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = 10.dp.toPx(); strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+                    this.color = color.copy(alpha = 0.3f).toArgb()
+                    maskFilter = android.graphics.BlurMaskFilter(6.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+                }
+                canvas.nativeCanvas.drawPath(minePath.asAndroidPath(), glow)
+            }
+            drawPath(minePath, color, style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+
             // x축 라벨 (초)
             listOf(-2f to "-2초", 0f to "0", 2f to "2초", 4f to "4초").forEach { (t, label) ->
-                val l = measurer.measure(label, TextStyle(fontSize = 16.sp, color = Sub))
+                val l = measurer.measure(label, TextStyle(fontSize = 16.sp, color = ChartLabel))
                 drawText(l, topLeft = Offset((x(t) - l.size.width / 2f).coerceIn(0f, size.width - l.size.width), plotBottom + 6.dp.toPx()))
             }
         }
+    }
+}
+
+/** 점들을 지나는 부드러운 곡선 (Catmull-Rom → cubicTo). 제어점 y를 [minY, maxY]로 제한해 범위 밖으로 넘치지 않게 함 */
+private fun smoothPath(p: List<Offset>, minY: Float = Float.NEGATIVE_INFINITY, maxY: Float = Float.POSITIVE_INFINITY) = Path().apply {
+    if (p.isEmpty()) return@apply
+    moveTo(p[0].x, p[0].y)
+    for (i in 0 until p.lastIndex) {
+        val p0 = p[maxOf(i - 1, 0)]; val p1 = p[i]; val p2 = p[i + 1]; val p3 = p[minOf(i + 2, p.lastIndex)]
+        cubicTo(
+            p1.x + (p2.x - p0.x) / 6f, (p1.y + (p2.y - p0.y) / 6f).coerceIn(minY, maxY),
+            p2.x - (p3.x - p1.x) / 6f, (p2.y - (p3.y - p1.y) / 6f).coerceIn(minY, maxY),
+            p2.x, p2.y,
+        )
     }
 }
 
@@ -787,8 +838,8 @@ private fun CompareChart(c: Comparison.Chart, color: Color) {
 private fun LegendLine(color: Color, dashed: Boolean) {
     Canvas(Modifier.width(28.dp).height(10.dp)) {
         drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2),
-            strokeWidth = (if (dashed) 3 else 4).dp.toPx(), cap = StrokeCap.Round,
-            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())) else null)
+            strokeWidth = (if (dashed) 2.5f else 3.5f).dp.toPx(), cap = StrokeCap.Round,
+            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 5.dp.toPx())) else null)
     }
 }
 
