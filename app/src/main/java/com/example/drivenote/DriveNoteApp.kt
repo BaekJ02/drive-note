@@ -1,6 +1,14 @@
 package com.example.drivenote
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,6 +69,8 @@ private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경, 파�
 private val DangerBg = Color(0xFFFCE8E6)   // 연한 빨강 배지 배경
 private val NeutralBg = Color(0xFFF1F3F4)  // 회색 배지 배경
 private val IconGray = Color(0xFF3C4149)   // 흰 원형 버튼 아이콘
+private val ChartBg = Color(0xFFF6F7F9)    // 비교 그래프 배경
+private val RecommendGray = Color(0xFF9AA0A6) // 비교 그래프 '권장' 선
 
 private val TOUCH = 100.dp          // 차량 화면용 최소 터치 영역
 private val SCREEN_PAD = 40.dp      // 콘텐츠 영역 바깥 여백
@@ -582,26 +592,123 @@ private fun TripDetail(t: TripLog) {
         modifier = Modifier.padding(top = 20.dp).fillMaxWidth().height(380.dp).clip(RoundedCornerShape(ITEM_RADIUS)),
         overlay = tripRouteOverlay(t, Accent), focus = focus,
     )
-    LazyColumn(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    // 문제 목록: 누르면 아래로 '내 운전 vs 권장' 비교가 펼쳐짐 (한 번에 하나, 처음엔 첫 항목)
+    var expanded by remember(t) { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
+    // 펼침 애니메이션이 끝난 뒤 그 항목이 위로 오게 스크롤 (아래쪽 항목을 펼쳐도 그래프가 잘리지 않게)
+    LaunchedEffect(expanded) {
+        if (expanded > 0) { kotlinx.coroutines.delay(350); listState.animateScrollToItem(expanded) }
+    }
+    LazyColumn(Modifier.padding(top = 16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(t.issues.size) { i ->
             val issue = t.issues[i]
-            Row(
+            val open = expanded == i
+            Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(ITEM_RADIUS))
-                    .clickable { focus = MapFocus(issuePoint(t, issue), ++seq) }
-                    .padding(horizontal = 12.dp, vertical = 14.dp),
+                    .background(if (open) Color(0xFFFAFBFC) else Color.Transparent)
             ) {
-                Box(Modifier.size(40.dp).clip(CircleShape).background(issue.type.color), contentAlignment = Alignment.Center) {
-                    Text("${issue.no}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-                Column(Modifier.padding(start = 20.dp)) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(issue.title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
-                        Text("${issue.time} · ${issue.place}", fontSize = 22.sp, color = Sub, modifier = Modifier.padding(start = 14.dp, bottom = 2.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(ITEM_RADIUS))
+                        .clickable {
+                            expanded = if (open) -1 else i
+                            focus = MapFocus(issuePoint(t, issue), ++seq) // 지도도 그 핀으로 이동
+                        }
+                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                ) {
+                    Box(Modifier.size(40.dp).clip(CircleShape).background(issue.type.color), contentAlignment = Alignment.Center) {
+                        Text("${issue.no}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    Text(issue.tip, fontSize = SMALL, color = Ink, modifier = Modifier.padding(top = 4.dp))
+                    Column(Modifier.weight(1f).padding(start = 20.dp)) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(issue.title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Text("${issue.time} · ${issue.place}", fontSize = 22.sp, color = Sub, modifier = Modifier.padding(start = 14.dp, bottom = 2.dp))
+                        }
+                        Text(issue.tip, fontSize = SMALL, color = Ink, modifier = Modifier.padding(top = 4.dp))
+                    }
+                    Text(if (open) "⌃" else "⌄", fontSize = 28.sp, color = Sub, modifier = Modifier.padding(start = 12.dp))
+                }
+                AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                    ComparisonView(ComparisonData.forIssue(issue), issue.type.color,
+                        Modifier.padding(start = 72.dp, end = 12.dp, bottom = 16.dp))
                 }
             }
         }
+    }
+}
+
+/** '내 운전 vs 권장' 비교: 꺾은선 그래프(또는 타임라인) + 한 줄 비교 문장 */
+@Composable
+private fun ComparisonView(c: Comparison, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        when (c) {
+            is Comparison.Chart -> CompareChart(c, color)
+            is Comparison.Timeline -> {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(ChartBg).padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(12.dp).clip(CircleShape).background(color))
+                    Text(boldMarkup(c.summary), fontSize = SMALL, color = Ink, modifier = Modifier.padding(start = 14.dp))
+                }
+            }
+        }
+        if (c is Comparison.Chart) {
+            Text(boldMarkup(c.summary), fontSize = SMALL, color = Ink, modifier = Modifier.padding(top = 12.dp))
+        }
+    }
+}
+
+/** 문장의 **굵게** 부분을 굵은 글씨로 */
+private fun boldMarkup(text: String) = buildAnnotatedString {
+    text.split("**").forEachIndexed { i, part ->
+        if (i % 2 == 1) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) } else append(part)
+    }
+}
+
+/** 내 운전(분류 색 실선 4dp) vs 권장(회색 점선 3dp). 좌상단 단위·범례, 아래 x축(초) 라벨 */
+@Composable
+private fun CompareChart(c: Comparison.Chart, color: Color) {
+    val measurer = rememberTextMeasurer()
+    Column(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(16.dp)).background(ChartBg).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(c.unit, fontSize = 18.sp, color = Sub)
+            Spacer(Modifier.width(24.dp))
+            LegendLine(color, dashed = false); Text("내 운전", fontSize = 18.sp, color = Ink, modifier = Modifier.padding(start = 6.dp, end = 18.dp))
+            LegendLine(RecommendGray, dashed = true); Text("권장", fontSize = 18.sp, color = Ink, modifier = Modifier.padding(start = 6.dp))
+        }
+        Canvas(Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp)) {
+            val labelH = 26.dp.toPx()
+            val plotTop = 6.dp.toPx(); val plotBottom = size.height - labelH
+            val side = 20.dp.toPx()
+            val n = c.mine.size
+            val tEnd = ComparisonData.T_START + (n - 1) * ComparisonData.T_STEP
+            fun x(t: Float) = side + (t - ComparisonData.T_START) / (tEnd - ComparisonData.T_START) * (size.width - 2 * side)
+            fun y(v: Float) = plotBottom - (v - c.yMin) / (c.yMax - c.yMin) * (plotBottom - plotTop)
+            fun path(vs: List<Float>) = Path().apply {
+                vs.forEachIndexed { i, v -> val px = x(ComparisonData.T_START + i * ComparisonData.T_STEP); if (i == 0) moveTo(px, y(v)) else lineTo(px, y(v)) }
+            }
+            // 기준선 (값 0)
+            val zero = y(0f.coerceIn(c.yMin, c.yMax))
+            drawLine(Line, Offset(side, zero), Offset(size.width - side, zero), strokeWidth = 1.dp.toPx())
+            drawPath(path(c.recommended), RecommendGray, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 8.dp.toPx()))))
+            drawPath(path(c.mine), color, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            // x축 라벨 (초)
+            listOf(-2f to "-2초", 0f to "0", 2f to "2초", 4f to "4초").forEach { (t, label) ->
+                val l = measurer.measure(label, TextStyle(fontSize = 16.sp, color = Sub))
+                drawText(l, topLeft = Offset((x(t) - l.size.width / 2f).coerceIn(0f, size.width - l.size.width), plotBottom + 6.dp.toPx()))
+            }
+        }
+    }
+}
+
+/** 범례 선 샘플 (실선/점선) */
+@Composable
+private fun LegendLine(color: Color, dashed: Boolean) {
+    Canvas(Modifier.width(28.dp).height(10.dp)) {
+        drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2),
+            strokeWidth = (if (dashed) 3 else 4).dp.toPx(), cap = StrokeCap.Round,
+            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())) else null)
     }
 }
 
@@ -680,7 +787,7 @@ private fun WeeklyLine(values: List<Int>, color: Color, modifier: Modifier) {
         drawLine(Line, Offset(0f, base), Offset(size.width, base), strokeWidth = 1.dp.toPx())
         // 꺾은선
         val path = Path().apply { pts.forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) } }
-        drawPath(path, color, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        drawPath(path, color, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         pts.forEachIndexed { i, p ->
             val now = i == lastIdx
             // 점

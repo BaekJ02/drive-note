@@ -173,6 +173,7 @@ object ReportData {
     private val places = mapOf(
         "시흥사거리" to (1 to 3), "대왕판교로" to (4 to 6), "헌릉로" to (7 to 9), "헌릉IC" to (9 to 11),
         "분당수서로" to (12 to 15), "수서IC" to (15 to 17), "대치동" to (16 to 18), "삼성동" to (19 to 21),
+        "대치동 교차로 우회전" to (18 to 20),
     )
     private val pangyoPlaces = mapOf("시흥동 교차로" to (0 to 1), "대왕판교로" to (1 to 3), "판교IC" to (3 to 5))
 
@@ -186,12 +187,13 @@ object ReportData {
         "방향지시등 미점등" to "진출로에 들어가기 전에 방향지시등을 먼저 켜 보세요.",
         "핸들 과다 조작" to "핸들을 조금 덜 돌려도 충분히 회전할 수 있어요.",
         "차로 내 흔들림" to "시선을 멀리 두면 차로 가운데를 더 쉽게 유지할 수 있어요.",
+        "핸들 급조작" to "핸들을 조금 더 천천히, 여유 있게 돌려 보세요.",
     )
     private val typeOf = mapOf(
         "급출발" to IssueType.ACCEL, "급가속" to IssueType.ACCEL,
         "브레이크 나눠 밟기" to IssueType.BRAKE, "급제동" to IssueType.BRAKE, "정차 직전 급제동" to IssueType.BRAKE,
         "방향지시등 늦게 켬" to IssueType.SIGNAL, "방향지시등 미점등" to IssueType.SIGNAL,
-        "핸들 과다 조작" to IssueType.STEER, "차로 내 흔들림" to IssueType.STEER,
+        "핸들 과다 조작" to IssueType.STEER, "차로 내 흔들림" to IssueType.STEER, "핸들 급조작" to IssueType.STEER,
     )
 
     /** 문제 목록 생성: (제목, 장소) 순서대로 번호를 붙이고, 시간은 경로상 위치로 계산 (explicit이 있으면 그 시간) */
@@ -262,9 +264,100 @@ object ReportData {
             // 홈 '최근 주행'과 같은 주행 (구간도 홈 지도와 동일)
             trip("08:42", "시흥동", "삼성동", 34, 14.8, 7, toWork,
                 "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "대치동",
-                times = listOf("08:44", "09:05", "09:12")),
+                "핸들 급조작" to "대치동 교차로 우회전",
+                times = listOf("08:44", "09:05", "09:12", "09:14")),
             trip("18:20", "삼성동", "시흥동", 41, 15.2, 4, toHome, "급제동" to "삼성동", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "헌릉IC"),
             trip("20:05", "시흥동", "판교", 18, 7.9, 1, toPangyo, "급출발" to "시흥동 교차로"),
         ),
     )
+}
+
+// ---------------- 리포트: 내 운전 vs 권장 비교 (이벤트 전후 -2초 ~ 4초, 0.1초 간격 61포인트)
+
+/** 문장 안의 **굵게** 표시는 화면에서 굵은 글씨로 바뀜 */
+sealed interface Comparison {
+    val summary: String
+
+    /** 꺾은선 2개: 내 운전(분류 색 실선) vs 권장(회색 점선) */
+    data class Chart(
+        val unit: String, val mine: List<Float>, val recommended: List<Float>,
+        val yMin: Float, val yMax: Float, override val summary: String,
+    ) : Comparison
+
+    /** 그래프가 어색한 항목(방향지시등): 타임라인 한 줄 */
+    data class Timeline(override val summary: String) : Comparison
+}
+
+object ComparisonData {
+    const val T_START = -2f
+    const val T_STEP = 0.1f
+    private val times = List(61) { T_START + it * T_STEP }
+
+    /** t0부터 dur초 동안 0→1로 부드럽게 (smoothstep) */
+    private fun ramp(t: Float, t0: Float, dur: Float): Float {
+        val x = ((t - t0) / dur).coerceIn(0f, 1f)
+        return x * x * (3 - 2 * x)
+    }
+    /** t0에서 시작해 rise초 동안 올라가고 hold초 유지, fall초 동안 내려오는 산 */
+    private fun hill(t: Float, t0: Float, rise: Float, hold: Float, fall: Float) =
+        ramp(t, t0, rise) - ramp(t, t0 + rise + hold, fall)
+    private fun series(f: (Float) -> Float) = times.map(f)
+
+    private val steering = Comparison.Chart(
+        "조향각(°)",
+        mine = series { 180f * hill(it, 0f, 0.8f, 0.4f, 0.8f) },
+        recommended = series { 120f * hill(it, 0f, 2f, 0f, 2f) },
+        yMin = 0f, yMax = 200f,
+        summary = "핸들을 최대 초당 **210°**로 돌렸어요 → 초당 **90°** 이하로 여유 있게 돌려 보세요",
+    )
+    private val accel = Comparison.Chart(
+        "가속 페달(%)",
+        mine = series { 80f * ramp(it, 0f, 0.6f) },
+        recommended = series { 40f * ramp(it, 0f, 2f) },
+        yMin = 0f, yMax = 100f,
+        summary = "**0.6초** 만에 페달을 **80%** 밟았어요 → **2초** 정도에 걸쳐 천천히 밟아 보세요",
+    )
+    private val brakeSplit = Comparison.Chart(
+        "감속도(m/s²)",
+        // 톱니 모양: 빠르게 올라갔다 떨어지기를 3번
+        mine = series { 4.0f * hill(it, -0.2f, 0.35f, 0.1f, 0.45f) + 3.6f * hill(it, 0.9f, 0.35f, 0.1f, 0.45f) + 3.9f * hill(it, 2.0f, 0.35f, 0.1f, 0.5f) },
+        recommended = series { 2.5f * hill(it, -0.2f, 1.2f, 1.2f, 1.3f) },
+        yMin = 0f, yMax = 5f,
+        summary = "브레이크를 **3번** 나눠 밟았어요 → **한 번에** 일정한 힘으로 밟아 보세요",
+    )
+    private val hardBrake = Comparison.Chart(
+        "감속도(m/s²)",
+        mine = series { 6.5f * hill(it, 0f, 0.4f, 0.8f, 0.6f) },
+        recommended = series { 3.0f * hill(it, -1f, 1.5f, 1f, 1.5f) },
+        yMin = 0f, yMax = 8f,
+        summary = "감속도가 최대 **6.5m/s²**까지 올라갔어요 → 미리 **3m/s²** 이하로 천천히 줄여 보세요",
+    )
+    private val stopBrake = Comparison.Chart(
+        "감속도(m/s²)",
+        // 일정하게 줄이다가 멈추기 직전에 확 밟음
+        mine = series { 2f * ramp(it, -2f, 0.5f) * (1 - ramp(it, 2.4f, 0.2f)) + 3.5f * hill(it, 1.6f, 0.3f, 0.3f, 0.2f) },
+        recommended = series { 2f * ramp(it, -2f, 0.5f) * (1 - ramp(it, 0.5f, 2.5f)) },
+        yMin = 0f, yMax = 6f,
+        summary = "멈추기 직전 감속도가 **5.5m/s²**로 튀었어요 → 마지막 **1초**는 브레이크를 살짝 풀어 보세요",
+    )
+    private val sway = Comparison.Chart(
+        "조향각(°)",
+        mine = series { 12f * kotlin.math.sin(it * 4.2f) },
+        recommended = series { 3f * kotlin.math.sin(it * 2.1f) },
+        yMin = -16f, yMax = 16f,
+        summary = "핸들이 좌우로 최대 **12°**씩 흔들렸어요 → **3°** 이내로 부드럽게 잡아 보세요",
+    )
+
+    /** 문제 항목 → 비교 그래프 (제목 기준) */
+    fun forIssue(i: DriveIssue): Comparison = when (i.title) {
+        "핸들 급조작", "핸들 과다 조작" -> steering
+        "차로 내 흔들림" -> sway
+        "급출발" -> accel
+        "급가속" -> accel.copy(summary = "**1초** 만에 페달을 **80%** 밟았어요 → **2초** 이상에 걸쳐 속도를 올려 보세요")
+        "브레이크 나눠 밟기" -> brakeSplit
+        "급제동" -> hardBrake
+        "정차 직전 급제동" -> stopBrake
+        "방향지시등 미점등" -> Comparison.Timeline("방향지시등 없이 차로 변경 → 차로를 바꾸기 **3초** 전에 켜 주세요")
+        else -> Comparison.Timeline("방향지시등 켬 **0.5초** 후 차로 변경 → **3초** 전에 켜 주세요")
+    }
 }
