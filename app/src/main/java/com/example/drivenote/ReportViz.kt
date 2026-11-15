@@ -72,8 +72,7 @@ fun ComparisonView(c: Comparison, color: Color, modifier: Modifier = Modifier) {
             is Comparison.StopApproach -> VizBox("정지선 접근 (0.5초 간격)", mineVsRecommended(color, LegendKind.Dot)) { StopApproachViz(c, color) }
             is Comparison.LaneChange -> VizBox("차로 변경 위에서 본 모습", mineVsRecommended(color, LegendKind.Solid)) { LaneChangeViz(c, color) }
             is Comparison.CrossingSpeed -> VizBox("횡단보도 앞 속도", mineVsRecommended(color, LegendKind.Solid)) { CrossingSpeedViz(c, color) }
-            // 궤적·원이 작아 보이지 않게 이 그림만 조금 높게
-            is Comparison.TurnPath -> VizBox("위에서 본 회전 궤적", mineVsRecommended(color, LegendKind.Solid), Modifier.height(280.dp)) { TurnPathViz(c, color) }
+            is Comparison.TurnPath -> VizBox("위에서 본 회전 궤적", mineVsRecommended(color, LegendKind.Solid)) { TurnPathViz(c, color) }
             is Comparison.Timeline -> Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(ChartBg).padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -364,57 +363,73 @@ private fun ColumnScope.CrossingSpeedViz(c: Comparison.CrossingSpeed, color: Col
 private fun ColumnScope.TurnPathViz(c: Comparison.TurnPath, color: Color) {
     val measurer = rememberTextMeasurer()
     Canvas(Modifier.fillMaxWidth().weight(1f)) {
-        // 배경: 연회색 정사각 격자 (28dp)
-        val cell = 28.dp.toPx()
-        var gx = 0f; while (gx <= size.width) { drawLine(ChartGrid, Offset(gx, 0f), Offset(gx, size.height), 1.dp.toPx()); gx += cell }
-        var gy = 0f; while (gy <= size.height) { drawLine(ChartGrid, Offset(0f, gy), Offset(size.width, gy), 1.dp.toPx()); gy += cell }
-
+        val lane = 3.5f // 차로 폭(m)
         // 회전 중심: |ω| 최대 지점에서 진행방향 오른쪽(우회전)으로 r
         fun center(t: Bicycle.Turn): Offset {
             val h = t.headings[t.peak]
             return Offset(t.xs[t.peak] - kotlin.math.sin(h) * t.radius, t.ys[t.peak] + kotlin.math.cos(h) * t.radius)
         }
-        // 내 운전을 먼저, 권장 점선을 위에 그려 겹치는 구간에서도 권장 선이 보이게
-        val turns = listOf(c.mine to color, c.recommended to RecommendGray)
-        // 궤적 + 원 전체가 들어오게 자동 스케일 (비율 유지)
-        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
-        turns.forEach { (t, _) ->
-            t.xs.forEach { minX = min(minX, it); maxX = maxOf(maxX, it) }
-            t.ys.forEach { minY = min(minY, it); maxY = maxOf(maxY, it) }
-            val ce = center(t)
-            minX = min(minX, ce.x - t.radius); maxX = maxOf(maxX, ce.x + t.radius)
-            minY = min(minY, ce.y - t.radius); maxY = maxOf(maxY, ce.y + t.radius)
+        val turns = listOf(c.mine, c.recommended)
+        // 도로 배치(m): 세로 도로는 x=0이 오른쪽(북행) 차로 가운데,
+        // 가로 도로는 우회전을 마친 궤적이 중앙선 아래(동행) 차로 가운데에 오도록
+        val endY = (c.mine.ys.last() + c.recommended.ys.last()) / 2
+        val vLeft = -1.5f * lane; val vRight = 0.5f * lane
+        val hTop = endY - 1.5f * lane; val hBottom = endY + 0.5f * lane
+
+        // 궤적 + 회전 중심 + 도로 가장자리가 들어오게 자동 스케일 (비율 유지)
+        var minX = vLeft; var maxX = 0f; var minY = hTop; var maxY = 0f
+        turns.forEach { t ->
+            t.xs.forEach { maxX = maxOf(maxX, it) }
+            val ce = center(t); maxX = maxOf(maxX, ce.x); maxY = maxOf(maxY, ce.y)
         }
-        val pad = 14.dp.toPx()
+        val pad = 6.dp.toPx()
         val s = min((size.width - 2 * pad) / (maxX - minX), (size.height - 2 * pad) / (maxY - minY))
         val ox = (size.width - (maxX - minX) * s) / 2 - minX * s
         val oy = (size.height - (maxY - minY) * s) / 2 - minY * s
         fun p(x: Float, y: Float) = Offset(ox + x * s, oy + y * s)
 
-        turns.forEach { (t, col) ->
-            val ce = center(t); val cp = p(ce.x, ce.y); val pk = p(t.xs[t.peak], t.ys[t.peak])
-            drawCircle(col.copy(alpha = 0.8f), t.radius * s, cp, style = Stroke(1.5.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 5.dp.toPx()))))
-            drawLine(col.copy(alpha = 0.8f), cp, pk, strokeWidth = 1.5.dp.toPx())
-            drawCircle(col.copy(alpha = 0.8f), 2.5.dp.toPx(), cp)
+        // 교차로: 아래에서 올라오는 세로 도로 + 오른쪽으로 뻗는 가로 도로 (연회색 띠, 가운데 흰 점선)
+        val dash = PathEffect.dashPathEffect(floatArrayOf(14.dp.toPx(), 10.dp.toPx()))
+        val vl = p(vLeft, hTop).x; val vr = p(vRight, hTop).x; val ht = p(0f, hTop).y; val hb = p(0f, hBottom).y
+        drawRect(RoadGray, Offset(vl, ht), Size(vr - vl, size.height - ht))
+        drawRect(RoadGray, Offset(vl, ht), Size(size.width - vl, hb - ht))
+        val vMid = p(-0.5f * lane, 0f).x; val hMid = p(0f, endY - 0.5f * lane).y
+        drawLine(Color.White, Offset(vMid, size.height), Offset(vMid, hb), strokeWidth = 2.dp.toPx(), pathEffect = dash)
+        drawLine(Color.White, Offset(vr, hMid), Offset(size.width, hMid), strokeWidth = 2.dp.toPx(), pathEffect = dash)
+
+        // 회전 반경: 최대 회전 지점 주변 호 120°(얇은 점선) + 중심점 + 반경 선
+        turns.forEach { t ->
+            val col = if (t === c.mine) color else RecommendGray
+            val ce = p(center(t).x, center(t).y); val pk = p(t.xs[t.peak], t.ys[t.peak]); val r = t.radius * s
+            val ang = Math.toDegrees(kotlin.math.atan2((pk.y - ce.y).toDouble(), (pk.x - ce.x).toDouble())).toFloat()
+            drawArc(col.copy(alpha = 0.5f), ang - 60f, 120f, false, Offset(ce.x - r, ce.y - r), Size(2 * r, 2 * r),
+                style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))))
+            drawLine(col.copy(alpha = 0.5f), ce, pk, strokeWidth = 1.dp.toPx())
+            drawCircle(col, 2.5.dp.toPx(), ce)
         }
-        turns.forEach { (t, col) ->
-            val pts = t.xs.indices.map { p(t.xs[it], t.ys[it]) }
-            val path = Path().apply { pts.forEachIndexed { i, q -> if (i == 0) moveTo(q.x, q.y) else lineTo(q.x, q.y) } }
-            if (col == RecommendGray) drawRecommendLine(path, 3.dp) else drawGlowLine(path, col, 4.dp)
-            // 끝에 진행 방향 화살표 머리
-            val h = t.headings.last(); val tip = pts.last(); val len = 12.dp.toPx(); val wid = 7.dp.toPx()
-            val dx = kotlin.math.cos(h); val dy = kotlin.math.sin(h)
-            val base = tip - Offset(dx * len, dy * len)
-            drawPath(Path().apply {
-                moveTo(tip.x + dx * 2.dp.toPx(), tip.y + dy * 2.dp.toPx())
-                lineTo(base.x - dy * wid, base.y + dx * wid); lineTo(base.x + dy * wid, base.y - dx * wid); close()
-            }, col)
+
+        // 궤적: 내 운전(실선 + 빛번짐), 권장(점선)은 위에 그려 겹쳐도 보이게
+        fun path(t: Bicycle.Turn) = Path().apply { t.xs.indices.forEach { i -> val q = p(t.xs[i], t.ys[i]); if (i == 0) moveTo(q.x, q.y) else lineTo(q.x, q.y) } }
+        drawGlowLine(path(c.mine), color)
+        drawRecommendLine(path(c.recommended))
+
+        // 주요 지점: 핸들 시작 · 다 풂 (흰 채움 + 선 색 테두리)
+        fun point(t: Bicycle.Turn, i: Int, col: Color) = p(t.xs[i], t.ys[i]).also {
+            drawCircle(Color.White, 6.dp.toPx(), it); drawCircle(col, 6.dp.toPx(), it, style = Stroke(2.5.dp.toPx()))
         }
-        // 반경 라벨: 회전 중심 옆 (내 운전은 중심 아래, 권장은 중심 오른쪽 → 서로 겹치지 않게)
-        val mc = center(c.mine); val rc = center(c.recommended)
-        label(measurer, "r ${"%.1f".format(c.mine.radius)}m", p(mc.x, mc.y) + Offset(0f, 6.dp.toPx()), color = color, size = 15f, bold = true)
-        label(measurer, "r ${"%.1f".format(c.recommended.radius)}m", p(rc.x, rc.y) + Offset(8.dp.toPx(), 0f), color = RecommendGray, size = 15f, bold = true, alignX = 0f, alignY = 0.5f)
+        val gap = 10.dp.toPx()
+        val ms = point(c.mine, c.mine.steerStart, color); val me = point(c.mine, c.mine.steerEnd, color)
+        val rs = point(c.recommended, c.recommended.steerStart, RecommendGray); val re = point(c.recommended, c.recommended.steerEnd, RecommendGray)
+        // 라벨이 겹치지 않게: 내 운전은 왼쪽·위, 권장은 오른쪽·아래
+        label(measurer, "핸들 시작", ms + Offset(-gap, 0f), color = IconGray, size = 15f, bold = true, alignX = 1f, alignY = 0.5f)
+        label(measurer, "핸들 시작", rs + Offset(gap, 0f), color = IconGray, size = 15f, bold = true, alignX = 0f, alignY = 0.5f)
+        label(measurer, "다 풂", me + Offset(0f, -gap), color = IconGray, size = 15f, bold = true, alignY = 1f)
+        label(measurer, "다 풂", re + Offset(0f, gap), color = IconGray, size = 15f, bold = true)
+
+        // 반경 라벨 ("12m"과 같은 스타일): 내 운전은 안쪽(중심 아래), 권장은 바깥쪽(중심 오른쪽)
+        val mc = p(center(c.mine).x, center(c.mine).y); val rc = p(center(c.recommended).x, center(c.recommended).y)
+        label(measurer, "r ${"%.1f".format(c.mine.radius)}m", mc + Offset(0f, 6.dp.toPx()), color = IconGray, size = 15f, bold = true)
+        label(measurer, "r ${"%.1f".format(c.recommended.radius)}m", rc + Offset(8.dp.toPx(), 0f), color = IconGray, size = 15f, bold = true, alignX = 0f, alignY = 0.5f)
     }
 }
 

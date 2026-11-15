@@ -472,11 +472,11 @@ object Bicycle {
 
     /**
      * 위에서 본 궤적. x, y는 m (화면 방향: y 아래 +), heading은 rad (위쪽 = -π/2, 시계 방향 +: 우회전)
-     * peak = |ω| 최대 지점, radius = v/|ω| (그 지점의 회전 반경)
+     * peak = |ω| 최대 지점, radius = v/|ω| (그 지점의 회전 반경), steerStart/steerEnd = 핸들 시작·다 푼 지점
      */
     data class Turn(
         val xs: List<Float>, val ys: List<Float>, val headings: List<Float>,
-        val maxLatG: Float, val peak: Int, val radius: Float,
+        val maxLatG: Float, val peak: Int, val radius: Float, val steerStart: Int, val steerEnd: Int,
     )
 
     fun simulate(steerDeg: List<Float>, speedKmh: List<Float>, dt: Float = 0.1f, heading0: Float = (-Math.PI / 2).toFloat()): Turn {
@@ -498,6 +498,9 @@ object Bicycle {
             xs, ys, hs,
             maxLatG = omegas.indices.maxOf { vs[it] * kotlin.math.abs(omegas[it]) } / G,
             peak = pk + 1, radius = vs[pk] / kotlin.math.abs(omegas[pk]),
+            // 핸들을 돌리기 시작한 지점 / 다 푼 지점 (핸들각이 거의 0이 아닌 첫·마지막 샘플)
+            steerStart = steerDeg.indexOfFirst { kotlin.math.abs(it) > 1f } + 1,
+            steerEnd = steerDeg.indexOfLast { kotlin.math.abs(it) > 1f } + 1,
         )
     }
 }
