@@ -19,6 +19,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Pleos Vehicle SDK
+        maven("https://nexus-playground.pleos.ai/repository/maven-releases/")
     }
 }
 

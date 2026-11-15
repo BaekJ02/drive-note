@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 // ---- 디자인 토큰 (차량 화면: 큰 글자, 큰 터치 영역)
@@ -56,39 +57,58 @@ private val BODY = 32.sp
 private val SMALL = 26.sp
 
 enum class Tab(val label: String) { HOME("홈"), REPORT("리포트"), TREND("개선 추이"), SETTINGS("설정") }
-enum class Gear { P, D }
-
 @Composable
-fun DriveNoteApp() {
-    var gear by remember { mutableStateOf(Gear.P) }
+fun DriveNoteApp(vehicle: VehicleRepository, engine: CoachingEngine, speak: (String) -> Unit) {
+    var gear by remember { mutableStateOf(DriveGear.P) }
     var tab by remember { mutableStateOf(Tab.HOME) }
     var voiceOn by remember { mutableStateOf(true) }
     var hasNewReport by remember { mutableStateOf(true) }
     val focus = remember { mutableStateListOf(2, 3) } // 집중 개선 항목 id
 
+    val sdkGear by vehicle.gear.collectAsState()
+    val connected by vehicle.connected.collectAsState()
+    val latest by engine.latest.collectAsState()
+    val trip by engine.trip.collectAsState()
+    val driving = gear != DriveGear.P
+
+    // 기어 변경: P가 아니면 주행 시작, P로 돌아오면 주행 종료 + 리포트 탭 자동 표시
+    fun changeGear(new: DriveGear) {
+        val wasDriving = gear != DriveGear.P
+        gear = new
+        if (!wasDriving && new != DriveGear.P) engine.startTrip()
+        if (wasDriving && new == DriveGear.P) {
+            engine.endTrip()
+            hasNewReport = true; tab = Tab.REPORT
+        }
+    }
+    // 실제 기어(Vehicle SDK)가 들어오면 그 값을 따름. 값이 없으면 데모 P/D 버튼으로 전환
+    LaunchedEffect(sdkGear) { sdkGear?.let { changeGear(it) } }
+    // 새 코칭이 감지되면 음성으로 읽어 줌
+    LaunchedEffect(latest?.seq) {
+        val e = latest ?: return@LaunchedEffect
+        if (voiceOn && driving) speak(e.type.message)
+    }
+
     ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.4.em)) {
         Box(Modifier.fillMaxSize().background(Bg)) {
-            if (gear == Gear.D) {
-                // 주행 중: 화면 조작 없음. 기록 상태와 최근 음성 코칭만 표시 (주행 규제 준수)
-                DrivingScreen(voiceOn)
+            if (driving) {
+                // 주행 중: 화면 조작 없음, 탭 이동 불가. 기록 상태와 최근 코칭만 표시 (주행 규제 준수)
+                DrivingScreen(voiceOn, gear, latest, connected, vehicle)
             } else {
                 Row(Modifier.fillMaxSize()) {
                     SideRail(tab, hasNewReport) { tab = it; if (it == Tab.REPORT) hasNewReport = false }
                     Box(Modifier.weight(1f).fillMaxHeight().padding(SCREEN_PAD)) {
                         when (tab) {
                             Tab.HOME -> HomeScreen(voiceOn, focus) { tab = Tab.REPORT; hasNewReport = false }
-                            Tab.REPORT -> ReportScreen()
+                            Tab.REPORT -> ReportScreen(trip)
                             Tab.TREND -> TrendScreen(focus)
                             Tab.SETTINGS -> SettingsScreen(voiceOn, { voiceOn = it }, focus)
                         }
                     }
                 }
             }
-            // 데모 전용: 실제 앱에서는 Vehicle SDK 기어 상태로 자동 전환
-            DemoGearSwitch(gear, Modifier.align(Alignment.BottomStart).padding(24.dp)) {
-                gear = it
-                if (it == Gear.P) { hasNewReport = true; tab = Tab.REPORT }
-            }
+            // 데모 전용: SDK 기어 값이 없을 때(일반 에뮬레이터 등) 시연용으로 P/D 전환
+            DemoGearSwitch(gear, Modifier.align(Alignment.BottomStart).padding(24.dp)) { changeGear(it) }
         }
     }
 }
@@ -282,7 +302,16 @@ private fun SummaryStat(label: String, value: String, modifier: Modifier) {
 
 // ---------------- 주행 중 (정보 최소화, 조작 요소 없음)
 @Composable
-private fun DrivingScreen(voiceOn: Boolean) {
+private fun DrivingScreen(voiceOn: Boolean, gear: DriveGear, latest: CoachingEvent?, connected: Boolean, vehicle: VehicleRepository) {
+    // 실시간 차량 값 (시연에서 바뀌는 게 보이도록 작게 표시)
+    val speed by vehicle.speedKmh.collectAsState()
+    val steering by vehicle.steeringDeg.collectAsState()
+    val signal by vehicle.turnSignal.collectAsState()
+    val brake by vehicle.brakeOn.collectAsState()
+    // SDK 연결 전(데모 모드)에는 목업 문구, 연결 후에는 실제 감지 메시지
+    val message = latest?.type?.message ?: if (connected) null else MockData.recentCoaching
+    val category = latest?.let { MockData.habits.first { h -> h.id == it.type.templateId }.category }
+        ?: MockData.recentCoachingCategory
     Column(
         Modifier.fillMaxSize().padding(SCREEN_PAD),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
@@ -313,13 +342,33 @@ private fun DrivingScreen(voiceOn: Boolean) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Label("방금 받은 코칭", Accent)
                         Spacer(Modifier.width(16.dp))
-                        CategoryTag(MockData.recentCoachingCategory)
+                        if (message != null) CategoryTag(category)
                     }
-                    Text(MockData.recentCoaching, fontSize = HEADLINE, fontWeight = FontWeight.SemiBold, color = Ink,
+                    Text(message ?: "아직 받은 코칭이 없어요. 지금처럼 부드럽게 운전해 주세요.",
+                        fontSize = HEADLINE, fontWeight = FontWeight.SemiBold, color = if (message != null) Ink else Sub,
                         modifier = Modifier.padding(top = 12.dp))
                 }
             }
         }
+
+        // 현재 차량 상태 (조회 전용 텍스트, 조작 요소 아님)
+        Row(Modifier.padding(top = 40.dp), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
+            VehicleValue("차속", speed?.let { "${it.toInt()} km/h" })
+            VehicleValue("기어", gear.name)
+            VehicleValue("핸들", steering?.let { val r = it.roundToInt(); if (r == 0) "0°" else "%+d°".format(r) })
+            VehicleValue("방향지시등", signal?.label)
+            VehicleValue("브레이크", brake?.let { if (it) "밟음" else "뗌" })
+        }
+        if (!connected) Text("차량 신호 없음 · 데모 모드", fontSize = SMALL, color = Sub, modifier = Modifier.padding(top = 12.dp))
+    }
+}
+
+@Composable
+private fun VehicleValue(label: String, value: String?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = SMALL, color = Sub)
+        Spacer(Modifier.width(10.dp))
+        Text(value ?: "—", fontSize = SMALL, fontWeight = FontWeight.SemiBold, color = Ink)
     }
 }
 
@@ -341,17 +390,20 @@ private fun SpeakerIcon(color: Color, modifier: Modifier) {
 
 // ---------------- 리포트 (목록 + 상세, 2단)
 @Composable
-private fun ReportScreen() {
-    var selected by remember { mutableStateOf(MockData.habits.first()) }
-    val d = MockData.lastDrive
+private fun ReportScreen(trip: TripRecord?) {
+    // 이번 주행에서 감지된 기록이 있으면 그걸, 없으면 목업 데이터를 보여 줌
+    val live = trip != null && trip.events.isNotEmpty()
+    val habits = remember(trip) { if (live) TripReport.habits(trip!!) else MockData.habits }
+    val d = remember(trip) { if (live) TripReport.summary(trip!!) else MockData.lastDrive }
+    var selected by remember(habits) { mutableStateOf(habits.first()) }
     Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
         ScreenHeader("주행 리포트", "${d.date} · ${d.route} · ${d.minutes}분 · ${d.km}km")
         Row(horizontalArrangement = Arrangement.spacedBy(GAP), modifier = Modifier.fillMaxSize()) {
             Panel(Modifier.weight(1f).fillMaxHeight()) {
-                Label("개선이 필요한 항목 ${MockData.habits.size}개")
+                Label("개선이 필요한 항목 ${habits.size}개")
                 Spacer(Modifier.height(16.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(MockData.habits) { h ->
+                    items(habits) { h ->
                         val sel = h.id == selected.id
                         Row(
                             Modifier.fillMaxWidth().heightIn(min = TOUCH).clip(RoundedCornerShape(ITEM_RADIUS))
@@ -560,10 +612,10 @@ private fun SettingsScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, focus:
 
 // ---------------- 데모용 기어 전환 (시연 영상 촬영용)
 @Composable
-private fun DemoGearSwitch(gear: Gear, modifier: Modifier, onChange: (Gear) -> Unit) {
+private fun DemoGearSwitch(gear: DriveGear, modifier: Modifier, onChange: (DriveGear) -> Unit) {
     Row(modifier.clip(RoundedCornerShape(14.dp)).background(Color(0x22000000)).padding(6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Gear.values().forEach { g ->
+        listOf(DriveGear.P, DriveGear.D).forEach { g ->
             Text("데모 ${g.name}", fontSize = 22.sp, color = if (g == gear) Color.White else Ink,
                 modifier = Modifier.clip(RoundedCornerShape(10.dp))
                     .background(if (g == gear) Ink else Color.Transparent)

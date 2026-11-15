@@ -2,6 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Pleos Vehicle SDK 조회용 권한 (protectionLevel=normal) -->
+    <!-- 기어·브레이크 페달·핸들 각도 -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <!-- 방향지시등 -->
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
+    <!-- 차속: Android Car API (런타임 권한) -->
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -11,12 +19,17 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.DriveNote">
+        <!-- 자동차가 아닌 기기에서도 설치·실행 가능하게 -->
+        <uses-library android:name="android.car" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.DriveNote"
             android:windowSoftInputMode="adjustResize">
+            <!-- 주행 중에도 시스템 주행 규제로 가려지지 않게 (주행 화면에는 조작 요소 없음) -->
+            <meta-data android:name="distractionOptimized" android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

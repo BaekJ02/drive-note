@@ -34,9 +34,12 @@ android {
     buildFeatures {
         compose = true
     }
+    // 차속(PERF_VEHICLE_SPEED)은 Vehicle SDK에 없어서 Android Car API 사용
+    useLibrary("android.car")
 }
 
 dependencies {
+    implementation(libs.pleos.vehicle)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
