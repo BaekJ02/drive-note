@@ -153,10 +153,13 @@ enum class IssueType(val color: Color) {
     STEER(Color(0xFF8E5BD9)),  // 조향 (보라)
 }
 
-/** 주행 중 감지된 문제 1건: route[from]..route[to] 구간을 색으로 표시하고, 구간 가운데에 번호 핀 */
+/**
+ * 주행 중 감지된 문제 1건: route[from]..route[to] 구간을 색으로 표시하고, 경로 위 pin 위치에 번호 핀.
+ * pin은 경로 인덱스(소수 가능: 5.5 = route[5]와 route[6] 사이 가운데) → 핀은 항상 경로 선 위
+ */
 data class DriveIssue(
     val no: Int, val type: IssueType, val title: String, val time: String, val place: String, val tip: String,
-    val from: Int, val to: Int,
+    val from: Int, val to: Int, val pin: Float = ((from + to) / 2).toFloat(),
 )
 
 data class TripLog(
@@ -183,7 +186,7 @@ object ReportData {
     private val places = mapOf(
         "시흥사거리" to (1 to 3), "대왕판교로" to (4 to 6), "헌릉로" to (7 to 9), "헌릉IC" to (9 to 11),
         "분당수서로" to (12 to 15), "수서IC" to (15 to 17), "대치동" to (16 to 18), "삼성동" to (19 to 21),
-        "대치동 교차로 우회전" to (18 to 20), "대치역 사거리" to (19 to 21),
+        "고등동 교차로 우회전" to (5 to 7), "세곡동 사거리" to (8 to 10),
     )
     private val pangyoPlaces = mapOf("시흥동 교차로" to (0 to 1), "대왕판교로" to (1 to 3), "판교IC" to (3 to 5))
 
@@ -212,6 +215,7 @@ object ReportData {
     private fun trip(
         start: String, from: String, to: String, minutes: Int, km: Double, count: Int, route: List<GeoPt>,
         vararg issues: Pair<String, String>, times: List<String>? = null,
+        pins: List<Float>? = null, // 핀 위치(경로 인덱스) 직접 지정. 없으면 구간 가운데
     ): TripLog {
         val last = route.lastIndex
         val list = issues.mapIndexed { i, (title, place) ->
@@ -226,7 +230,8 @@ object ReportData {
             val (h, m) = start.split(":").map(String::toInt)
             val at = h * 60 + m + minutes * a / last
             val time = times?.get(i) ?: "%02d:%02d".format(at / 60, at % 60)
-            DriveIssue(i + 1, typeOf.getValue(title), title, time, place, tips.getValue(title), a, b)
+            val pin = pins?.get(i)?.coerceIn(a.toFloat(), b.toFloat()) ?: ((a + b) / 2).toFloat()
+            DriveIssue(i + 1, typeOf.getValue(title), title, time, place, tips.getValue(title), a, b, pin)
         }
         return TripLog(start, from, to, minutes, km, count, route, list)
     }
@@ -277,10 +282,12 @@ object ReportData {
         ),
         15 to listOf(
             // 홈 '최근 주행'과 같은 주행 (구간도 홈 지도와 동일)
+            // 핀은 전체 경로가 보이는 기본 배율에서 서로 약 2.6km(≈60dp) 이상 떨어지게 배치
             trip("08:42", "시흥동", "삼성동", 34, 14.8, 8, toWork,
-                "급출발" to "시흥사거리", "브레이크 나눠 밟기" to "분당수서로", "우회전 전 일시정지 안 함" to "대치역 사거리",
-                "방향지시등 늦게 켬" to "대치동", "핸들 급조작" to "대치동 교차로 우회전",
-                times = listOf("08:44", "09:05", "09:10", "09:12", "09:14")),
+                "급출발" to "시흥사거리", "핸들 급조작" to "고등동 교차로 우회전", "우회전 전 일시정지 안 함" to "세곡동 사거리",
+                "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "대치동",
+                times = listOf("08:44", "08:52", "08:57", "09:05", "09:12"),
+                pins = listOf(2f, 6.1f, 9f, 14.7f, 17.1f)),
             trip("18:20", "삼성동", "시흥동", 41, 15.2, 4, toHome, "급제동" to "삼성동", "브레이크 나눠 밟기" to "분당수서로", "방향지시등 늦게 켬" to "헌릉IC"),
             trip("20:05", "시흥동", "판교", 18, 7.9, 1, toPangyo, "급출발" to "시흥동 교차로"),
         ),
@@ -313,6 +320,11 @@ sealed interface Comparison {
         val mineSignalM: Float, val recSignalM: Float, override val metric: String, override val summary: String,
     ) : Comparison
 
+    /** 회전 궤적: 자전거 모델로 계산한 위에서 본 궤적 2개 (내 운전, 권장) */
+    data class TurnPath(
+        val mine: Bicycle.Turn, val recommended: Bicycle.Turn, override val metric: String, override val summary: String,
+    ) : Comparison
+
     /** 횡단보도 앞 속도: 횡단보도까지 남은 거리(m, 음수는 지난 뒤) → 속도(km/h) */
     data class CrossingSpeed(
         val distance: List<Float>, val mine: List<Float>, val recommended: List<Float>,
@@ -335,13 +347,6 @@ object ComparisonData {
         ramp(t, t0, rise) - ramp(t, t0 + rise + hold, fall)
     private fun series(f: (Float) -> Float) = times.map(f)
 
-    private val steering = Comparison.Chart(
-        "조향각(°)",
-        mine = series { 180f * hill(it, 0f, 0.8f, 0.4f, 0.8f) },
-        recommended = series { 120f * hill(it, 0f, 2f, 0f, 2f) },
-        yMin = 0f, yMax = 200f,
-        summary = "핸들을 최대 초당 **210°**로 돌렸어요 → 초당 **90°** 이하로 여유 있게 돌려 보세요",
-    )
     private val accel = Comparison.Chart(
         "가속 페달(%)",
         mine = series { 80f * ramp(it, 0f, 0.6f) },
@@ -407,12 +412,41 @@ object ComparisonData {
         summary = "우회전 전 횡단보도 앞에서는 **완전히** 멈췄다 출발해요",
     )
 
+    /**
+     * 20km/h 우회전 핸들각 시계열 (0.1초 간격). start초에 시작해 ramp초 동안 peak°까지 돌리고 hold초 유지, ramp초 동안 풂.
+     * hold는 최종 진행 방향이 90° 우회전이 되도록 이분 탐색으로 맞춤
+     */
+    private fun rightTurn(start: Float, ramp: Float, peak: Float, total: Float = 6f): Bicycle.Turn {
+        val n = (total / 0.1f).toInt()
+        fun s01(x: Float): Float { val c = x.coerceIn(0f, 1f); return c * c * (3 - 2 * c) }
+        fun steer(hold: Float) = List(n) { i -> val t = i * 0.1f; peak * (s01((t - start) / ramp) - s01((t - start - ramp - hold) / ramp)) }
+        val speed = List(n) { 20f }
+        var lo = 0f; var hi = 4f
+        repeat(40) {
+            val mid = (lo + hi) / 2
+            val turn = Bicycle.simulate(steer(mid), speed)
+            if (turn.headings.last() - turn.headings.first() < (Math.PI / 2).toFloat()) lo = mid else hi = mid
+        }
+        return Bicycle.simulate(steer((lo + hi) / 2), speed)
+    }
+    private val turnPath: Comparison.TurnPath by lazy {
+        val mine = rightTurn(start = 1.5f, ramp = 0.5f, peak = 420f) // 늦게, 빠르게, 많이
+        val rec = rightTurn(start = 0.5f, ramp = 1.4f, peak = 250f)  // 1초 일찍, 천천히, 덜
+        Comparison.TurnPath(
+            mine, rec,
+            // {{ }} = 분류 색 굵게(내 운전), [[ ]] = 진회색 굵게(권장)
+            metric = "최대 쏠림 {{%.2fg}} → 권장 [[%.2fg]] 이하   회전 반경 {{%.1fm}} → 권장 [[%.1fm]]"
+                .format(mine.maxLatG, rec.maxLatG, mine.radius, rec.radius),
+            summary = "교차로 진입 전에 핸들을 조금 일찍, 천천히 돌리면 몸이 덜 쏠려요",
+        )
+    }
+
     /** 문제 항목 → 비교 그래프 (제목 기준) */
     fun forIssue(i: DriveIssue): Comparison = when (i.title) {
         "정차 직전 급제동" -> stopApproach
         "방향지시등 늦게 켬" -> laneChange
         "우회전 전 일시정지 안 함" -> crossing
-        "핸들 급조작", "핸들 과다 조작" -> steering
+        "핸들 급조작", "핸들 과다 조작" -> turnPath
         "차로 내 흔들림" -> sway
         "급출발" -> accel
         "급가속" -> accel.copy(summary = "**1초** 만에 페달을 **80%** 밟았어요 → **2초** 이상에 걸쳐 속도를 올려 보세요")
@@ -420,6 +454,51 @@ object ComparisonData {
         "급제동" -> hardBrake
         "방향지시등 미점등" -> Comparison.Timeline("방향지시등 없이 차로 변경 → 차로를 바꾸기 **3초** 전에 켜 주세요")
         else -> Comparison.Timeline("방향지시등 켬 **0.5초** 후 차로 변경 → **3초** 전에 켜 주세요")
+    }
+}
+
+// ---------------- 자전거 모델 (쏠림 요약 · 회전 궤적 공용)
+
+object Bicycle {
+    const val STEER_RATIO = 15f // 핸들각 : 바퀴 각
+    const val WHEELBASE = 3.0f  // 축거(m)
+    const val G = 9.81f
+
+    /** 요레이트 ω(rad/s) = v·tanδ / 축거. v(m/s), δ = 바퀴 각(rad) */
+    fun yawRate(v: Float, wheelRad: Float) = v * kotlin.math.tan(wheelRad) / WHEELBASE
+
+    /** 핸들각(°) → 바퀴 각(rad) */
+    fun wheelRad(steerDeg: Float) = Math.toRadians((steerDeg / STEER_RATIO).toDouble()).toFloat()
+
+    /**
+     * 위에서 본 궤적. x, y는 m (화면 방향: y 아래 +), heading은 rad (위쪽 = -π/2, 시계 방향 +: 우회전)
+     * peak = |ω| 최대 지점, radius = v/|ω| (그 지점의 회전 반경)
+     */
+    data class Turn(
+        val xs: List<Float>, val ys: List<Float>, val headings: List<Float>,
+        val maxLatG: Float, val peak: Int, val radius: Float,
+    )
+
+    fun simulate(steerDeg: List<Float>, speedKmh: List<Float>, dt: Float = 0.1f, heading0: Float = (-Math.PI / 2).toFloat()): Turn {
+        var x = 0f; var y = 0f; var th = heading0
+        val xs = mutableListOf(x); val ys = mutableListOf(y); val hs = mutableListOf(th)
+        val omegas = mutableListOf<Float>(); val vs = mutableListOf<Float>()
+        for (i in steerDeg.indices) {
+            val v = speedKmh[i] / 3.6f
+            val w = yawRate(v, wheelRad(steerDeg[i]))
+            th += w * dt
+            x += v * kotlin.math.cos(th) * dt; y += v * kotlin.math.sin(th) * dt
+            xs += x; ys += y; hs += th; omegas += w; vs += v
+        }
+        val maxW = omegas.maxOf { kotlin.math.abs(it) }
+        // |ω|가 최대인 구간(유지 구간)의 가운데 지점
+        val near = omegas.indices.filter { kotlin.math.abs(omegas[it]) >= maxW * 0.999f }
+        val pk = near[near.size / 2]
+        return Turn(
+            xs, ys, hs,
+            maxLatG = omegas.indices.maxOf { vs[it] * kotlin.math.abs(omegas[it]) } / G,
+            peak = pk + 1, radius = vs[pk] / kotlin.math.abs(omegas[pk]),
+        )
     }
 }
 
@@ -445,7 +524,7 @@ object GForceData {
      * 앞뒤 g = 차속 미분, 좌우 g = v·ω (자전거 모델: 조향각 δ → ω = v·tanδ / 축거)
      */
     private fun generate(t: TripLog): GSummary {
-        val n = 300; val dt = 0.5f; val g = 9.81f; val wheelBase = 2.9f
+        val n = 300; val dt = 0.5f; val g = Bicycle.G; val wheelBase = Bicycle.WHEELBASE
         val rnd = java.util.Random(t.start.hashCode().toLong() * 31 + t.route.size)
         val lonEv = FloatArray(n); val latEv = FloatArray(n); val env = FloatArray(n)
         fun add(arr: FloatArray, center: Float, peak: Float, rise: Float, hold: Float) {
@@ -480,8 +559,8 @@ object GForceData {
             val nv = maxOf(1f, v + a * dt)
             val lon = (nv - v) / dt / g // 차속 미분
             val latWanted = latEv[i] + calm * 0.045f * rnd.nextGaussian().toFloat()
-            val delta = kotlin.math.atan(latWanted * g * wheelBase / (v * v)) // 조향각
-            val omega = v * kotlin.math.tan(delta) / wheelBase                // 요레이트
+            val delta = kotlin.math.atan(latWanted * g * wheelBase / (v * v)) // 바퀴 각
+            val omega = Bicycle.yawRate(v, delta)                              // 요레이트
             val lat = v * omega / g                                            // 좌우 g = v·ω
             v = nv
             GSample(lat, lon)

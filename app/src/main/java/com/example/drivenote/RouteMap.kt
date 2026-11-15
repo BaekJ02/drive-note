@@ -75,7 +75,14 @@ fun tripRouteOverlay(t: TripLog, routeColor: Color) = RouteOverlay(
     t.issues.map { MapPin(it.no, issuePoint(t, it), it.type.color) },
 )
 
-fun issuePoint(t: TripLog, i: DriveIssue): GeoPt = t.route[(i.from + i.to) / 2]
+/** 핀 위치: 경로 인덱스 pin(소수 가능)을 두 꼭짓점 사이에서 보간 → 항상 경로 선 위 */
+fun issuePoint(t: TripLog, i: DriveIssue): GeoPt {
+    val k = i.pin.toInt().coerceIn(0, t.route.lastIndex)
+    val f = (i.pin - k).toDouble()
+    if (k >= t.route.lastIndex || f <= 0.0) return t.route[k]
+    val a = t.route[k]; val b = t.route[k + 1]
+    return GeoPt(a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f)
+}
 
 /**
  * 최근 주행 경로 지도.

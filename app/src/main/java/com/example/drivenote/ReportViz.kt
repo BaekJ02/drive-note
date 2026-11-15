@@ -48,6 +48,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
@@ -71,6 +72,8 @@ fun ComparisonView(c: Comparison, color: Color, modifier: Modifier = Modifier) {
             is Comparison.StopApproach -> VizBox("정지선 접근 (0.5초 간격)", mineVsRecommended(color, LegendKind.Dot)) { StopApproachViz(c, color) }
             is Comparison.LaneChange -> VizBox("차로 변경 위에서 본 모습", mineVsRecommended(color, LegendKind.Solid)) { LaneChangeViz(c, color) }
             is Comparison.CrossingSpeed -> VizBox("횡단보도 앞 속도", mineVsRecommended(color, LegendKind.Solid)) { CrossingSpeedViz(c, color) }
+            // 궤적·원이 작아 보이지 않게 이 그림만 조금 높게
+            is Comparison.TurnPath -> VizBox("위에서 본 회전 궤적", mineVsRecommended(color, LegendKind.Solid), Modifier.height(280.dp)) { TurnPathViz(c, color) }
             is Comparison.Timeline -> Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(ChartBg).padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -79,7 +82,7 @@ fun ComparisonView(c: Comparison, color: Color, modifier: Modifier = Modifier) {
                 Text(boldMarkup(c.summary), fontSize = SMALL, color = Ink, modifier = Modifier.padding(start = 14.dp))
             }
         }
-        if (c !is Comparison.Timeline) VizText(c.metric, c.summary)
+        if (c !is Comparison.Timeline) VizText(c.metric, c.summary, color)
     }
 }
 
@@ -88,6 +91,23 @@ fun boldMarkup(text: String) = buildAnnotatedString {
     text.split("**").forEachIndexed { i, part ->
         if (i % 2 == 1) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) } else append(part)
     }
+}
+
+/** 지표 줄 표시: **굵게**, {{분류 색 굵게}}(내 운전 값), [[진회색 굵게]](권장 값) */
+private fun metricMarkup(text: String, accent: Color) = buildAnnotatedString {
+    val token = Regex("""\*\*(.+?)\*\*|\{\{(.+?)\}\}|\[\[(.+?)\]\]""")
+    var last = 0
+    token.findAll(text).forEach { m ->
+        append(text.substring(last, m.range.first))
+        val (bold, mine, rec) = m.destructured
+        when {
+            bold.isNotEmpty() -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
+            mine.isNotEmpty() -> withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = accent)) { append(mine) }
+            else -> withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = IconGray)) { append(rec) }
+        }
+        last = m.range.last + 1
+    }
+    append(text.substring(last))
 }
 
 // ---------------- 공통: 박스 · 범례 · 지표 줄
@@ -122,8 +142,8 @@ fun VizBox(title: String, legend: List<LegendItem>, modifier: Modifier = Modifie
 
 /** 그림 아래: 지표 한 줄(회색, 숫자만 굵게) + 요약 문장 */
 @Composable
-private fun VizText(metric: String?, summary: String) {
-    if (metric != null) Text(boldMarkup(metric), fontSize = 24.sp, color = Sub, modifier = Modifier.padding(top = 14.dp))
+private fun VizText(metric: String?, summary: String, accent: Color) {
+    if (metric != null) Text(metricMarkup(metric, accent), fontSize = 24.sp, color = Sub, modifier = Modifier.padding(top = 14.dp))
     Text(boldMarkup(summary), fontSize = 28.sp, color = Ink, modifier = Modifier.padding(top = if (metric != null) 6.dp else 14.dp))
 }
 
@@ -144,7 +164,7 @@ private fun LegendMark(color: Color, kind: LegendKind) {
 // ---------------- 공통 그리기 도우미
 
 /** 내 운전 선: 은은한 빛번짐(같은 색 30%, 10dp, 흐림) 위에 3.5dp 본선 */
-private fun DrawScope.drawGlowLine(path: Path, color: Color) {
+private fun DrawScope.drawGlowLine(path: Path, color: Color, width: Dp = 3.5.dp) {
     drawIntoCanvas { canvas ->
         val glow = androidx.compose.ui.graphics.Paint().asFrameworkPaint().apply {
             isAntiAlias = true
@@ -155,12 +175,12 @@ private fun DrawScope.drawGlowLine(path: Path, color: Color) {
         }
         canvas.nativeCanvas.drawPath(path.asAndroidPath(), glow)
     }
-    drawPath(path, color, style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(path, color, style = Stroke(width.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
-/** 권장 선: 회색 2.5dp 점선 */
-private fun DrawScope.drawRecommendLine(path: Path) {
-    drawPath(path, RecommendGray, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round,
+/** 권장 선: 회색 점선 (기본 2.5dp) */
+private fun DrawScope.drawRecommendLine(path: Path, width: Dp = 2.5.dp) {
+    drawPath(path, RecommendGray, style = Stroke(width.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round,
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 8.dp.toPx()))))
 }
 
@@ -335,6 +355,66 @@ private fun ColumnScope.CrossingSpeedViz(c: Comparison.CrossingSpeed, color: Col
         drawCircle(Color.White, 7.dp.toPx(), mp); drawCircle(color, 5.dp.toPx(), mp)
         label(measurer, "최저 ${c.mine[mi].toInt()}km/h", mp + Offset(-8.dp.toPx(), -10.dp.toPx()), color = IconGray, size = 15f, bold = true, alignX = 1f, alignY = 1f)
         listOf(30f, 20f, 10f, 0f).forEach { d -> label(measurer, "${d.toInt()}m", Offset(x(d), plotBottom + 6.dp.toPx()), size = 16f) }
+    }
+}
+
+// ---------------- 핸들 급조작: 위에서 본 회전 궤적 + 회전 반경 원
+
+@Composable
+private fun ColumnScope.TurnPathViz(c: Comparison.TurnPath, color: Color) {
+    val measurer = rememberTextMeasurer()
+    Canvas(Modifier.fillMaxWidth().weight(1f)) {
+        // 배경: 연회색 정사각 격자 (28dp)
+        val cell = 28.dp.toPx()
+        var gx = 0f; while (gx <= size.width) { drawLine(ChartGrid, Offset(gx, 0f), Offset(gx, size.height), 1.dp.toPx()); gx += cell }
+        var gy = 0f; while (gy <= size.height) { drawLine(ChartGrid, Offset(0f, gy), Offset(size.width, gy), 1.dp.toPx()); gy += cell }
+
+        // 회전 중심: |ω| 최대 지점에서 진행방향 오른쪽(우회전)으로 r
+        fun center(t: Bicycle.Turn): Offset {
+            val h = t.headings[t.peak]
+            return Offset(t.xs[t.peak] - kotlin.math.sin(h) * t.radius, t.ys[t.peak] + kotlin.math.cos(h) * t.radius)
+        }
+        // 내 운전을 먼저, 권장 점선을 위에 그려 겹치는 구간에서도 권장 선이 보이게
+        val turns = listOf(c.mine to color, c.recommended to RecommendGray)
+        // 궤적 + 원 전체가 들어오게 자동 스케일 (비율 유지)
+        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        turns.forEach { (t, _) ->
+            t.xs.forEach { minX = min(minX, it); maxX = maxOf(maxX, it) }
+            t.ys.forEach { minY = min(minY, it); maxY = maxOf(maxY, it) }
+            val ce = center(t)
+            minX = min(minX, ce.x - t.radius); maxX = maxOf(maxX, ce.x + t.radius)
+            minY = min(minY, ce.y - t.radius); maxY = maxOf(maxY, ce.y + t.radius)
+        }
+        val pad = 14.dp.toPx()
+        val s = min((size.width - 2 * pad) / (maxX - minX), (size.height - 2 * pad) / (maxY - minY))
+        val ox = (size.width - (maxX - minX) * s) / 2 - minX * s
+        val oy = (size.height - (maxY - minY) * s) / 2 - minY * s
+        fun p(x: Float, y: Float) = Offset(ox + x * s, oy + y * s)
+
+        turns.forEach { (t, col) ->
+            val ce = center(t); val cp = p(ce.x, ce.y); val pk = p(t.xs[t.peak], t.ys[t.peak])
+            drawCircle(col.copy(alpha = 0.8f), t.radius * s, cp, style = Stroke(1.5.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 5.dp.toPx()))))
+            drawLine(col.copy(alpha = 0.8f), cp, pk, strokeWidth = 1.5.dp.toPx())
+            drawCircle(col.copy(alpha = 0.8f), 2.5.dp.toPx(), cp)
+        }
+        turns.forEach { (t, col) ->
+            val pts = t.xs.indices.map { p(t.xs[it], t.ys[it]) }
+            val path = Path().apply { pts.forEachIndexed { i, q -> if (i == 0) moveTo(q.x, q.y) else lineTo(q.x, q.y) } }
+            if (col == RecommendGray) drawRecommendLine(path, 3.dp) else drawGlowLine(path, col, 4.dp)
+            // 끝에 진행 방향 화살표 머리
+            val h = t.headings.last(); val tip = pts.last(); val len = 12.dp.toPx(); val wid = 7.dp.toPx()
+            val dx = kotlin.math.cos(h); val dy = kotlin.math.sin(h)
+            val base = tip - Offset(dx * len, dy * len)
+            drawPath(Path().apply {
+                moveTo(tip.x + dx * 2.dp.toPx(), tip.y + dy * 2.dp.toPx())
+                lineTo(base.x - dy * wid, base.y + dx * wid); lineTo(base.x + dy * wid, base.y - dx * wid); close()
+            }, col)
+        }
+        // 반경 라벨: 회전 중심 옆 (내 운전은 중심 아래, 권장은 중심 오른쪽 → 서로 겹치지 않게)
+        val mc = center(c.mine); val rc = center(c.recommended)
+        label(measurer, "r ${"%.1f".format(c.mine.radius)}m", p(mc.x, mc.y) + Offset(0f, 6.dp.toPx()), color = color, size = 15f, bold = true)
+        label(measurer, "r ${"%.1f".format(c.recommended.radius)}m", p(rc.x, rc.y) + Offset(8.dp.toPx(), 0f), color = RecommendGray, size = 15f, bold = true, alignX = 0f, alignY = 0.5f)
     }
 }
 
