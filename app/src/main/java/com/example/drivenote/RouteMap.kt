@@ -65,13 +65,8 @@ data class RouteOverlay(val route: List<GeoPt>, val parts: List<Triple<Int, Int,
 /** 지도 이동 요청 (같은 지점을 다시 눌러도 동작하도록 seq를 바꿔 보냄) */
 data class MapFocus(val at: GeoPt, val seq: Int)
 
-/** 홈 '최근 주행' 경로 (습관 구간 색) */
-fun homeRouteOverlay(routeColor: Color) = RouteOverlay(
-    MockData.lastDriveRoute,
-    routeParts(routeColor, MockData.lastDriveRoute.lastIndex, MockData.lastDriveSegments.map { s ->
-        Triple(s.from, s.to, MockData.habits.first { it.id == s.habitId }.category.color)
-    }),
-)
+/** 홈 '최근 주행' 경로: 리포트의 같은 주행(11/15 08:42)과 같은 문제 구간·분류 색 (번호 핀 없음) */
+fun homeRouteOverlay(routeColor: Color) = tripRouteOverlay(ReportData.latestTrip, routeColor).copy(pins = emptyList())
 
 /** 리포트 주행 경로: 문제 구간 색 + 구간 가운데 번호 핀 */
 fun tripRouteOverlay(t: TripLog, routeColor: Color) = RouteOverlay(
@@ -100,6 +95,7 @@ fun issuePoint(t: TripLog, i: DriveIssue): GeoPt = t.route[(i.from + i.to) / 2]
 fun DriveRouteMap(
     routeColor: Color, modifier: Modifier = Modifier, showAllSegments: Boolean = true, habit: Habit? = null,
     bottomInset: Dp = 0.dp, interactive: Boolean = false, overlay: RouteOverlay? = null, focus: MapFocus? = null,
+    resetTop: Dp = 16.dp, // '돌아가기' 버튼 위 여백 (홈은 오른쪽 위 '개선할 점' 버튼 아래로)
 ) {
     val ov = overlay ?: homeRouteOverlay(routeColor)
     val context = LocalContext.current
@@ -143,7 +139,7 @@ fun DriveRouteMap(
                     .padding(horizontal = 6.dp, vertical = 2.dp))
         }
         if (gestures && view.moved) {
-            MapResetButton(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+            MapResetButton(Modifier.align(Alignment.TopEnd).padding(top = resetTop, end = 16.dp)) {
                 // 처음 위치로 부드럽게 되돌림
                 val (z0, x0, y0) = Triple(view.zoom, view.tx, view.ty)
                 scope.launch {

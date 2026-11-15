@@ -1,6 +1,10 @@
 package com.example.drivenote
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -218,6 +222,7 @@ private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showShare by remember { mutableStateOf(false) }
+    var issuesOpen by remember { mutableStateOf(false) }
     fun toast(msg: String) = scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(msg) }
     val today = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREAN).format(Date()) }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
@@ -242,13 +247,18 @@ private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(RADIUS))
         ) {
             // 1순위 네이버 지도 SDK, 실패 시 내장 이미지 (드래그·핀치 확대, '돌아가기')
-            HomeRouteMap(Accent, bottomInset = barInset, modifier = Modifier.fillMaxSize())
+            HomeRouteMap(Accent, bottomInset = barInset, modifier = Modifier.fillMaxSize(),
+                resetTop = 20.dp + 56.dp + 16.dp) // '돌아가기'는 '개선할 점' 버튼 아래
             Text(
                 "최근 주행", fontSize = SMALL, fontWeight = FontWeight.SemiBold, color = Ink,
                 modifier = Modifier.align(Alignment.TopStart).padding(20.dp)
                     .shadow(4.dp, RoundedCornerShape(12.dp)).background(Color.White, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
+            // '개선할 점' 패널이 열려 있을 때 지도 다른 곳을 누르면 접힘
+            if (issuesOpen) {
+                Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null) { issuesOpen = false })
+            }
             FloatingDriveBar(openReport, Modifier.align(Alignment.BottomCenter))
             // 원형 버튼 2개: 오른쪽 끝을 '리포트 보기' 버튼 오른쪽 끝에 맞추고, 바 위로 16dp
             Column(
@@ -266,6 +276,9 @@ private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport
                 }
                 RoundIconButton(R.drawable.ic_share, "주행 리포트 공유", bg = Color.White, tint = IconGray) { showShare = true }
             }
+            // 오른쪽 위 '개선할 점': 접히면 깃발 버튼, 펼치면 목록 카드 (오른쪽 위 모서리 고정)
+            IssuesPanel(issuesOpen, onToggle = { issuesOpen = !issuesOpen }, onItem = { issuesOpen = false; openReport() },
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 20.dp - PANEL_SHADOW_PAD, end = 20.dp - PANEL_SHADOW_PAD))
             // 스낵바: 지도 하단, 떠 있는 바 바로 위 가운데
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = barInset + 8.dp))
         }
@@ -275,6 +288,73 @@ private fun HomeScreen(voiceOn: Boolean, setVoice: (Boolean) -> Unit, openReport
             showShare = false
             toast("열람 전용 링크를 복사했어요")
         }
+    }
+}
+
+/**
+ * 홈 지도 오른쪽 위 '개선할 점'.
+ * 접힘: 흰 원형 깃발 버튼 + 빨간 개수 배지. 펼침: 흰 카드(헤더 + 항목 목록).
+ * 오른쪽 위 모서리를 고정한 채 왼쪽·아래로 커지고 작아짐 (크기 변화 + 페이드, 250ms).
+ */
+@Composable
+private fun IssuesPanel(open: Boolean, onToggle: () -> Unit, onItem: () -> Unit, modifier: Modifier) {
+    val issues = MockData.homeIssues
+    val total = issues.sumOf { it.third }
+    AnimatedContent(
+        targetState = open, modifier = modifier, contentAlignment = Alignment.TopEnd, label = "issues",
+        // clip = true: 크기가 커지는 동안 오른쪽 위부터 드러남 (그림자가 잘리지 않게 내용 둘레에 여백)
+        transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) using SizeTransform(clip = true) { _, _ -> tween(250) } },
+    ) { expanded ->
+        if (!expanded) {
+            // 배지가 버튼 오른쪽 위에 살짝 걸치도록 바깥 여백을 두고 겹침
+            Box(Modifier.padding(PANEL_SHADOW_PAD)) {
+                RoundIconButton(R.drawable.ic_flag, "개선할 점 ${total}건 펼치기", bg = Color.White, tint = IconGray, onClick = onToggle)
+                CountBadge(total, Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-8).dp))
+            }
+        } else {
+            Surface(
+                shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 4.dp,
+                modifier = Modifier.padding(PANEL_SHADOW_PAD).width(360.dp),
+            ) {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(painterResource(R.drawable.ic_flag), null, tint = IconGray, modifier = Modifier.size(26.dp))
+                        Text("개선할 점", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 10.dp, end = 10.dp))
+                        CountBadge(total)
+                        Spacer(Modifier.weight(1f))
+                        Icon(painterResource(R.drawable.ic_expand_less), "접기", tint = IconGray, modifier = Modifier.size(32.dp))
+                    }
+                    issues.forEach { (name, type, count) ->
+                        Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(Line))
+                        Row(
+                            Modifier.fillMaxWidth().clickable(onClick = onItem).padding(horizontal = 20.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(14.dp).clip(CircleShape).background(type.color))
+                            Text(name, fontSize = 24.sp, color = Ink, modifier = Modifier.weight(1f).padding(start = 14.dp))
+                            Text("${count}건", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+        }
+    }
+}
+
+private val PANEL_SHADOW_PAD = 12.dp // '개선할 점' 그림자·배지가 잘리지 않게 두는 둘레 여백
+
+/** 빨간 개수 배지: 지름 28dp, 흰 테두리 2dp, 흰 굵은 숫자 */
+@Composable
+private fun CountBadge(n: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(28.dp).clip(CircleShape).background(Color.White).padding(2.dp).clip(CircleShape).background(Danger),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("$n", fontSize = 15.sp, lineHeight = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
     }
 }
 

@@ -105,6 +105,15 @@ object MockData {
 
     // 리포트 공유 대상 (열람 전용)
     val sharedWith = "엄마"
+    // 홈 '개선할 점' 패널: 최근 주행의 개선 필요 항목 (이름, 분류, 건수) — 합계 7건
+    val homeIssues = listOf(
+        Triple("브레이크 나눠 밟기", IssueType.BRAKE, 2),
+        Triple("정차 직전 급제동", IssueType.BRAKE, 1),
+        Triple("급출발·급가속", IssueType.ACCEL, 2),
+        Triple("방향지시등 늦게 켬", IssueType.SIGNAL, 1),
+        Triple("핸들 급조작", IssueType.STEER, 1),
+    )
+
     // 홈 공유 다이얼로그: (이름, 관계)
     val shareTargets = listOf("김강사" to "운전 강사", "가족" to "엄마")
 
@@ -218,6 +227,9 @@ object ReportData {
         }
         return TripLog(start, from, to, minutes, km, count, route, list)
     }
+
+    /** 홈 '최근 주행' = 11월 15일 08:42 주행 */
+    val latestTrip get() = trips.getValue(15).first()
 
     /** 날짜의 주행 목록 (목업은 2026년 11월만) */
     fun tripsOn(date: java.time.LocalDate): List<TripLog> =

@@ -59,6 +59,7 @@ fun HomeRouteMap(
     routeColor: Color, bottomInset: Dp, modifier: Modifier = Modifier,
     overlay: RouteOverlay? = null, // null이면 홈 '최근 주행' 경로
     focus: MapFocus? = null,       // 이 지점으로 카메라 이동
+    resetTop: Dp = 16.dp,          // '돌아가기' 버튼 위 여백
 ) {
     val context = LocalContext.current
     val ov = overlay ?: homeRouteOverlay(routeColor)
@@ -73,13 +74,13 @@ fun HomeRouteMap(
         mutableStateOf(reason == null)
     }
     if (useSdk) {
-        NaverRouteMap(routeColor, bottomInset, modifier, ov, focus) { reason ->
+        NaverRouteMap(routeColor, bottomInset, modifier, ov, focus, resetTop) { reason ->
             Log.w(TAG, "네이버 지도 SDK 실패 → 내장 이미지로 대체: $reason")
             naverSdkFailed = true
             useSdk = false
         }
     } else {
-        DriveRouteMap(routeColor, modifier, bottomInset = bottomInset, interactive = true, overlay = overlay, focus = focus)
+        DriveRouteMap(routeColor, modifier, bottomInset = bottomInset, interactive = true, overlay = overlay, focus = focus, resetTop = resetTop)
     }
 }
 
@@ -97,7 +98,8 @@ private fun hasNetwork(context: Context): Boolean {
 
 @Composable
 private fun NaverRouteMap(
-    routeColor: Color, bottomInset: Dp, modifier: Modifier, ov: RouteOverlay, focus: MapFocus?, onFailed: (String) -> Unit,
+    routeColor: Color, bottomInset: Dp, modifier: Modifier, ov: RouteOverlay, focus: MapFocus?, resetTop: Dp,
+    onFailed: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -185,7 +187,7 @@ private fun NaverRouteMap(
         }
 
         if (moved) {
-            MapResetButton(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+            MapResetButton(Modifier.align(Alignment.TopEnd).padding(top = resetTop, end = 16.dp)) {
                 map?.moveCamera(fitRoute().animate(CameraAnimation.Easing))
                 moved = false
             }
