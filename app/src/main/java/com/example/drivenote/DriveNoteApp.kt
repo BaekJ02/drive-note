@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
@@ -54,7 +56,9 @@ private val Line = Color(0xFFE2E5EA)
 private val Accent = Color(0xFF1A73E8)
 private val Danger = Color(0xFFD9443B)
 private val Positive = Color(0xFF2E9E5B)
-private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경
+private val SelectedBg = Color(0xFFE8F0FE) // 선택된 목록 행 배경, 파란 배지 배경
+private val DangerBg = Color(0xFFFCE8E6)   // 연한 빨강 배지 배경
+private val NeutralBg = Color(0xFFF1F3F4)  // 회색 배지 배경
 
 private val TOUCH = 100.dp          // 차량 화면용 최소 터치 영역
 private val SCREEN_PAD = 40.dp      // 콘텐츠 영역 바깥 여백
@@ -529,7 +533,7 @@ private fun TripDetail(t: TripLog) {
     }
 }
 
-// ---------------- 개선 추이 (최근 4주 막대)
+// ---------------- 개선 추이 (최근 4주 꺾은선)
 @Composable
 private fun TrendScreen(focus: List<Int>) {
     Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
@@ -538,29 +542,9 @@ private fun TrendScreen(focus: List<Int>) {
             items(MockData.habits.sortedByDescending { it.id in focus }) { h ->
                 Panel(Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CategoryTag(h.category)
-                                if (h.id in focus) {
-                                    Spacer(Modifier.width(12.dp))
-                                    Text("집중 항목", fontSize = SMALL, color = Accent, fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).border(2.dp, Accent, RoundedCornerShape(12.dp))
-                                            .padding(horizontal = 12.dp, vertical = 4.dp))
-                                }
-                            }
-                            Text(h.name, fontSize = BODY, fontWeight = FontWeight.SemiBold, color = Ink, modifier = Modifier.padding(top = 12.dp))
-                            val first = h.weekly.first()
-                            val last = h.weekly.last()
-                            val change = when {
-                                first > last -> "${first - last}회 감소"
-                                first < last -> "${last - first}회 증가"
-                                else -> "변화 없음"
-                            }
-                            Text("4주 전 ${first}회 → 이번 주 ${last}회 ($change)", fontSize = SMALL, color = Sub,
-                                modifier = Modifier.padding(top = 4.dp))
-                        }
+                        TrendInfo(h, h.id in focus, Modifier.weight(1f))
                         Spacer(Modifier.width(GAP))
-                        WeeklyBars(h.weekly, h.category.color, Modifier.width(320.dp).height(110.dp))
+                        WeeklyLine(h.weekly, h.category.color, Modifier.width(440.dp).height(160.dp))
                     }
                 }
             }
@@ -568,19 +552,80 @@ private fun TrendScreen(focus: List<Int>) {
     }
 }
 
+/** 개선 추이 카드 왼쪽: 분류(+집중 항목) / 항목 이름 / 이번 주 횟수 + 4주 전 대비 배지 */
 @Composable
-private fun WeeklyBars(values: List<Int>, color: Color, modifier: Modifier) {
+private fun TrendInfo(h: Habit, focused: Boolean, modifier: Modifier) {
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(h.category.color))
+            Text(h.category.label, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = h.category.color,
+                modifier = Modifier.padding(start = 10.dp))
+            if (focused) {
+                Pill("집중 항목", SelectedBg, Accent, Modifier.padding(start = 14.dp))
+            }
+        }
+        Text(h.name, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 14.dp))
+        val first = h.weekly.first()
+        val last = h.weekly.last()
+        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("이번 주", fontSize = 22.sp, color = Sub)
+            Text("${last}회", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 12.dp))
+            val (text, bg, fg) = when {
+                last < first -> Triple("4주 전보다 ${first - last}회 ↓", SelectedBg, Accent)
+                last > first -> Triple("4주 전보다 ${last - first}회 ↑", DangerBg, Danger)
+                else -> Triple("4주 전과 같아요", NeutralBg, Sub)
+            }
+            Pill(text, bg, fg, Modifier.padding(start = 16.dp))
+        }
+    }
+}
+
+/** 테두리 없는 둥근 배지 */
+@Composable
+private fun Pill(text: String, bg: Color, fg: Color, modifier: Modifier = Modifier) {
+    Text(text, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = fg,
+        modifier = modifier.clip(RoundedCornerShape(10.dp)).background(bg).padding(horizontal = 12.dp, vertical = 4.dp))
+}
+
+/**
+ * 최근 4주 꺾은선: 점 4개를 분류 색 선으로 잇고, 점 위에 값, 아래 기준선과 주 라벨.
+ * 지난주들은 흰 채움 + 색 테두리의 작은 점 · 회색 숫자, 이번 주는 색으로 채운 큰 점 · 굵은 검정 숫자.
+ */
+@Composable
+private fun WeeklyLine(values: List<Int>, color: Color, modifier: Modifier) {
+    val measurer = rememberTextMeasurer()
+    val labels = listOf("3주 전", "2주 전", "1주 전", "이번 주")
     val max = (values.maxOrNull() ?: 1).coerceAtLeast(1)
     Canvas(modifier) {
-        val gap = 16.dp.toPx()
-        val w = (size.width - gap * (values.size - 1)) / values.size
-        values.forEachIndexed { i, v ->
-            val h = size.height * v / max
-            drawRoundRect(
-                color = if (i == values.lastIndex) color else color.copy(alpha = 0.35f),
-                topLeft = Offset(i * (w + gap), size.height - h),
-                size = Size(w, h), cornerRadius = CornerRadius(8.dp.toPx())
-            )
+        val top = 40.dp.toPx()             // 값 숫자가 잘리지 않게 위 여백
+        val base = size.height - 34.dp.toPx() // 기준선 (값 0), 그 아래 주 라벨
+        val sideInset = 36.dp.toPx()
+        val step = (size.width - 2 * sideInset) / (values.size - 1)
+        val pts = values.mapIndexed { i, v -> Offset(sideInset + i * step, base - (base - top) * v / max) }
+        val lastIdx = values.lastIndex
+
+        // 기준선
+        drawLine(Line, Offset(0f, base), Offset(size.width, base), strokeWidth = 1.dp.toPx())
+        // 꺾은선
+        val path = Path().apply { pts.forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) } }
+        drawPath(path, color, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        pts.forEachIndexed { i, p ->
+            val now = i == lastIdx
+            // 점
+            if (now) {
+                drawCircle(color, 9.dp.toPx(), p)
+            } else {
+                drawCircle(Color.White, 6.dp.toPx(), p)
+                drawCircle(color, 6.dp.toPx(), p, style = Stroke(3.dp.toPx()))
+            }
+            // 값 숫자 (점 위)
+            val v = measurer.measure("${values[i]}", TextStyle(fontSize = if (now) 24.sp else 20.sp,
+                fontWeight = if (now) FontWeight.Bold else FontWeight.Normal, color = if (now) Ink else Sub))
+            drawText(v, topLeft = Offset(p.x - v.size.width / 2f, p.y - (if (now) 12 else 9).dp.toPx() - v.size.height))
+            // 주 라벨 (기준선 아래)
+            val l = measurer.measure(labels.getOrElse(i) { "" }, TextStyle(fontSize = 20.sp,
+                fontWeight = if (now) FontWeight.Bold else FontWeight.Normal, color = if (now) Ink else Sub))
+            drawText(l, topLeft = Offset(p.x - l.size.width / 2f, base + 6.dp.toPx()))
         }
     }
 }
