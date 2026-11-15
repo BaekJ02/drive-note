@@ -16,3 +16,6 @@ captures/
 
 # Python
 __pycache__/
+
+# 네이버 Static Map 이미지 (tools/make_route_map.py로 생성, APK에는 포함)
+app/src/main/res/drawable-nodpi/route_map.png

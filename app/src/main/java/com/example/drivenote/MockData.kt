@@ -72,13 +72,15 @@ object MockData {
         GeoPt(37.50880, 127.06315), // 21 도착 (삼성동)
     )
 
-    // 내장 지도 이미지(res/drawable-nodpi/route_map.png)의 타일 범위 (Web Mercator, 타일 256px)
-    // tools/make_route_map.py가 출력하는 값과 같아야 함. 이미지 좌상단 = (tileX0, tileY0) 타일의 좌상단
-    const val routeMapZoom = 13
-    const val routeMapTileX0 = 6984
-    const val routeMapTileY0 = 3173
-    const val routeMapCols = 9
-    const val routeMapRows = 5
+    // 내장 지도 이미지(res/drawable-nodpi/route_map.png): 네이버 Static Map 요청값
+    // tools/make_route_map.py가 자동으로 갱신함. Web Mercator, 256px 타일 기준 줌 = level,
+    // 이미지 크기 = 요청 크기(w, h) x scale, 이미지 중심 = center
+    const val routeMapCenterLat = 37.464744
+    const val routeMapCenterLon = 127.094985
+    const val routeMapLevel = 12
+    const val routeMapScale = 2
+    const val routeMapWidth = 2048  // px (= 1024 x 2)
+    const val routeMapHeight = 932 // px (= 466 x 2)
 
     // 습관이 감지된 구간 (홈 지도에 분류 색으로 강조)
     val lastDriveSegments = listOf(
