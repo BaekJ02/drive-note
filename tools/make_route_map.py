@@ -45,10 +45,11 @@ ENDPOINTS = [
     "https://maps.apigw.ntruss.com/map-static/v2/raster",
     "https://naveropenapi.apigw.ntruss.com/map-static/v2/raster",
 ]
-W, H = 1024, 466   # 요청 크기 (API 최대 1024). 홈 지도 카드 비율 약 2.2:1
-SCALE = 2          # 고해상도 → 실제 이미지 2048x932
+W, H = 1024, 706   # 요청 크기 (API 최대 1024). 홈 지도 카드 비율 약 1.45:1
+SCALE = 2          # 고해상도 → 실제 이미지 2048x1412
 MARGIN = 0.12      # 경로 바깥 여유 (가로·세로 각 방향 비율)
 MAX_LEVEL = 18
+BOTTOM_RESERVE = 0.18  # 아래쪽 비율: 홈 카드의 떠 있는 정보 바가 덮는 영역. 경로는 그 위에 둠
 LEVEL_OFFSET = 1   # 네이버 level L = 256px 타일 줌 L+1 (앱 RouteMap.kt와 같아야 함)
 
 
@@ -77,17 +78,21 @@ def unworld(x, y):
 
 
 def view(pts):
-    """경로 영역의 중심(위경도)과, 여유를 두고 W x H 안에 들어가는 가장 큰 level"""
+    """경로가 여유를 두고 W x (H 위쪽 1-BOTTOM_RESERVE) 영역에 들어가는 가장 큰 level과,
+    그때 경로가 그 위쪽 영역 가운데 오도록 아래로 내린 이미지 중심(위경도)"""
     xs, ys = zip(*(world(lat, lon) for lat, lon in pts))
-    lat, lon = unworld((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
-    lat, lon = round(lat, 6), round(lon, 6)  # 요청·MockData에 같은 값을 쓰도록 반올림 후 사용
     dx, dy = max(xs) - min(xs), max(ys) - min(ys)
+    usable_h = H * (1 - BOTTOM_RESERVE)
     level = 0
     for z in range(MAX_LEVEL, -1, -1):
         k = 2 ** (z + LEVEL_OFFSET)
-        if dx * k <= W * (1 - 2 * MARGIN) and dy * k <= H * (1 - 2 * MARGIN):
+        if dx * k <= W * (1 - 2 * MARGIN) and dy * k <= usable_h * (1 - 2 * MARGIN):
             level = z
             break
+    k = 2 ** (level + LEVEL_OFFSET)
+    shift = H * BOTTOM_RESERVE / 2 / k  # 이미지 중심을 경로 중심보다 이만큼(월드 픽셀) 아래로
+    lat, lon = unworld((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2 + shift)
+    lat, lon = round(lat, 6), round(lon, 6)  # 요청·MockData에 같은 값을 쓰도록 반올림 후 사용
     return lat, lon, level
 
 

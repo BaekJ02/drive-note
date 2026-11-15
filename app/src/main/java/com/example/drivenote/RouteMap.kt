@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -50,9 +51,14 @@ private val Casing = Color.White
  *
  * @param showAllSegments true면 습관 감지 구간을 모두 분류 색으로 강조 (홈)
  * @param habit 지정하면 그 습관의 구간만 강조하고 발생 지점 마커를 표시 (리포트 상세)
+ * @param bottomInset 지도 아래쪽에 다른 요소(떠 있는 정보 바 등)가 겹치는 높이.
+ *   경로는 그 위쪽 영역 안에 맞춰 그리고, 저작권 표기도 그 위로 올림 (기본 0 = 기존과 같음)
  */
 @Composable
-fun DriveRouteMap(routeColor: Color, modifier: Modifier = Modifier, showAllSegments: Boolean = true, habit: Habit? = null) {
+fun DriveRouteMap(
+    routeColor: Color, modifier: Modifier = Modifier, showAllSegments: Boolean = true, habit: Habit? = null,
+    bottomInset: Dp = 0.dp,
+) {
     val context = LocalContext.current
     val image = remember { loadRouteMapImage(context) }
     val measurer = rememberTextMeasurer()
@@ -60,10 +66,10 @@ fun DriveRouteMap(routeColor: Color, modifier: Modifier = Modifier, showAllSegme
     Box(modifier.clipToBounds().background(MapIllustrationBg)) {
         Canvas(Modifier.fillMaxSize()) {
             val project: (GeoPt) -> Offset = if (image != null) {
-                drawImageProjection(image)
+                drawImageProjection(image, bottomInset.toPx())
             } else {
                 drawMapBase()
-                fitProjection()
+                fitProjection(bottomInset.toPx())
             }
             drawRoute(project, routeColor, showAllSegments, habit)
             if (image == null) {
@@ -75,7 +81,7 @@ fun DriveRouteMap(routeColor: Color, modifier: Modifier = Modifier, showAllSegme
         if (image != null) {
             // 네이버 지도 저작권 표시 (사용 조건)
             Text("© NAVER Corp.", fontSize = 14.sp, color = Color(0xFF5F6672),
-                modifier = Modifier.align(Alignment.BottomEnd).background(Color.White.copy(alpha = 0.8f))
+                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = bottomInset).background(Color.White.copy(alpha = 0.8f))
                     .padding(horizontal = 6.dp, vertical = 2.dp))
         }
     }
@@ -124,17 +130,18 @@ private fun imagePixel(g: GeoPt): Offset {
  * 경로 전체가 들어가는 배율과 이미지가 화면을 꽉 채우는 배율 중 큰 쪽을 쓰고,
  * 이미지 밖(빈 영역)이 보이지 않게 위치를 조정한다.
  */
-private fun DrawScope.drawImageProjection(image: ImageBitmap): (GeoPt) -> Offset {
+private fun DrawScope.drawImageProjection(image: ImageBitmap, bottomInset: Float = 0f): (GeoPt) -> Offset {
     val px = MockData.lastDriveRoute.map(::imagePixel)
     val minX = px.minOf { it.x }; val maxX = px.maxOf { it.x }
     val minY = px.minOf { it.y }; val maxY = px.maxOf { it.y }
     val pad = 40.dp.toPx()
-    val fit = min((size.width - 2 * pad) / (maxX - minX), (size.height - 2 * pad) / (maxY - minY))
+    val areaH = size.height - bottomInset // 경로를 둘 영역 (아래 겹치는 부분 제외)
+    val fit = min((size.width - 2 * pad) / (maxX - minX), (areaH - 2 * pad) / (maxY - minY))
     val cover = max(size.width / image.width, size.height / image.height)
     val s = max(fit, cover)
     // 경로 중심을 화면 중심에 두되, 이미지가 화면을 벗어나지 않게 제한
     var ox = size.width / 2 - (minX + maxX) / 2 * s
-    var oy = size.height / 2 - (minY + maxY) / 2 * s
+    var oy = areaH / 2 - (minY + maxY) / 2 * s
     ox = ox.coerceIn(size.width - image.width * s, 0f)
     oy = oy.coerceIn(size.height - image.height * s, 0f)
     drawImage(
@@ -147,15 +154,16 @@ private fun DrawScope.drawImageProjection(image: ImageBitmap): (GeoPt) -> Offset
 }
 
 /** 대체 지도: 경로 영역을 화면 비율에 맞춰 가운데에 배치 (경도는 위도에 따라 축소) */
-private fun DrawScope.fitProjection(): (GeoPt) -> Offset {
+private fun DrawScope.fitProjection(bottomInset: Float = 0f): (GeoPt) -> Offset {
     val route = MockData.lastDriveRoute
     val k = cos(Math.toRadians(route.map { it.lat }.average()))
     val minLat = route.minOf { it.lat }; val maxLat = route.maxOf { it.lat }
     val minLon = route.minOf { it.lon }; val maxLon = route.maxOf { it.lon }
     val pad = 36.dp.toPx()
-    val scale = min((size.width - 2 * pad) / ((maxLon - minLon) * k), (size.height - 2 * pad) / (maxLat - minLat))
+    val areaH = size.height - bottomInset
+    val scale = min((size.width - 2 * pad) / ((maxLon - minLon) * k), (areaH - 2 * pad) / (maxLat - minLat))
     val offX = (size.width - (maxLon - minLon) * k * scale) / 2
-    val offY = (size.height - (maxLat - minLat) * scale) / 2
+    val offY = (areaH - (maxLat - minLat) * scale) / 2
     return { g -> Offset((offX + (g.lon - minLon) * k * scale).toFloat(), (offY + (maxLat - g.lat) * scale).toFloat()) }
 }
 

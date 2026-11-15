@@ -16,7 +16,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.os.Build
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -107,7 +116,7 @@ fun DriveNoteApp(vehicle: VehicleRepository, engine: CoachingEngine, speak: (Str
                     SideRail(tab, hasNewReport) { tab = it; if (it == Tab.REPORT) hasNewReport = false }
                     Box(Modifier.weight(1f).fillMaxHeight().padding(SCREEN_PAD)) {
                         when (tab) {
-                            Tab.HOME -> HomeScreen(voiceOn, focus) { tab = Tab.REPORT; hasNewReport = false }
+                            Tab.HOME -> HomeScreen(focus) { tab = Tab.REPORT; hasNewReport = false }
                             Tab.REPORT -> ReportScreen(trip)
                             Tab.TREND -> TrendScreen(focus)
                             Tab.SETTINGS -> SettingsScreen(voiceOn, { voiceOn = it }, focus)
@@ -193,10 +202,10 @@ private fun CategoryTag(c: Category) {
 
 // ---------------- 홈
 @Composable
-private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Unit) {
+private fun HomeScreen(focus: List<Int>, openReport: () -> Unit) {
     val d = MockData.lastDrive
     val today = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREAN).format(Date()) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(32.dp)) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
         // 인사말: 이름만 굵게
         Column {
             Text(buildAnnotatedString {
@@ -212,73 +221,98 @@ private fun HomeScreen(voiceOn: Boolean, focus: List<Int>, openReport: () -> Uni
             }
         }
 
-        // 최근 주행: 지도(60%) + 정보(40%)
-        Row(
-            Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(RADIUS)).background(Surface)
-                .border(1.dp, Line, RoundedCornerShape(RADIUS)).padding(20.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+        // 최근 주행: 지도가 카드 전체를 채우고, 정보 바가 지도 위에 떠 있음 (남은 공간을 거의 다 차지)
+        var cardSize by remember { mutableStateOf(IntSize.Zero) }
+        var cardPos by remember { mutableStateOf(Offset.Zero) }
+        val barInset = HOME_BAR_HEIGHT + HOME_BAR_MARGIN // 경로·저작권 표기를 바 위쪽에 두기 위한 높이
+        Box(
+            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(RADIUS))
+                .onGloballyPositioned { cardSize = it.size; cardPos = it.positionInRoot() }
         ) {
-            // 지도: 고정 높이 + 둥근 모서리로 잘라서 카드·오른쪽 정보 영역 밖으로 그려지지 않게 함
+            DriveRouteMap(Accent, Modifier.fillMaxSize(), bottomInset = barInset)
+            Text(
+                "최근 주행", fontSize = SMALL, fontWeight = FontWeight.SemiBold, color = Ink,
+                modifier = Modifier.align(Alignment.TopStart).padding(20.dp)
+                    .shadow(4.dp, RoundedCornerShape(12.dp)).background(Color.White, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+            FloatingDriveBar(cardSize, cardPos, barInset, openReport, Modifier.align(Alignment.BottomCenter))
+        }
+
+        // 이번 주 한 줄 요약
+        val focusNames = MockData.habits.filter { it.id in focus }.joinToString(", ") { FOCUS_SHORT_NAMES[it.id] ?: it.name }
+        Text("이번 주 31건 · 지난주보다 6건 줄었어요 · 집중 항목: $focusNames", fontSize = SMALL, color = Sub, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+private val HOME_BAR_HEIGHT = 108.dp
+private val HOME_BAR_MARGIN = 24.dp
+private val HOME_BAR_SHAPE = RoundedCornerShape(28.dp)
+
+// 홈 한 줄 요약에 쓰는 집중 항목 짧은 이름 (없으면 습관 이름 그대로)
+private val FOCUS_SHORT_NAMES = mapOf(2 to "브레이크 나눠 밟기", 3 to "정차 직전 급제동")
+
+/**
+ * 지도 위에 떠 있는 최근 주행 정보 바.
+ * 반투명 흰 배경 + 얇은 흰 테두리 + 그림자. Android 12(API 31) 이상에서는 같은 지도를
+ * 바 위치에 맞춰 한 번 더 그려 흐리게 해서 뒤 배경 흐림처럼 보이게 함 (Compose에는 배경 흐림 API가 없음).
+ */
+@Composable
+private fun FloatingDriveBar(cardSize: IntSize, cardPos: Offset, barInset: androidx.compose.ui.unit.Dp, openReport: () -> Unit, modifier: Modifier) {
+    val d = MockData.lastDrive
+    var barPos by remember { mutableStateOf(Offset.Zero) }
+    Box(
+        modifier.padding(start = HOME_BAR_MARGIN, end = HOME_BAR_MARGIN, bottom = HOME_BAR_MARGIN)
+            .fillMaxWidth().height(HOME_BAR_HEIGHT)
+            .onGloballyPositioned { barPos = it.positionInRoot() }
+            .shadow(28.dp, HOME_BAR_SHAPE, ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.22f))
+            .clip(HOME_BAR_SHAPE)
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && cardSize != IntSize.Zero) {
+            val dx = (barPos.x - cardPos.x).roundToInt(); val dy = (barPos.y - cardPos.y).roundToInt()
             DriveRouteMap(
                 Accent,
-                Modifier.weight(0.6f).height(420.dp).clip(RoundedCornerShape(ITEM_RADIUS)).clipToBounds()
+                Modifier.matchParentSize().blur(24.dp, BlurredEdgeTreatment.Rectangle).layout { m, c ->
+                    // 카드 크기로 그리고, 바 위치만큼 당겨서 바 뒤에 있는 부분이 보이게 함
+                    val p = m.measure(Constraints.fixed(cardSize.width, cardSize.height))
+                    layout(c.maxWidth, c.maxHeight) { p.place(-dx, -dy) }
+                },
+                bottomInset = barInset,
             )
-            Column(Modifier.weight(0.4f).fillMaxHeight().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Label("최근 주행")
-                // 출발·도착 타임라인
-                Column(Modifier.padding(top = 12.dp)) {
-                    TimelineRow(MockData.lastDriveDepart, "출발", MockData.lastDriveFrom, first = true)
-                    TimelineRow(MockData.lastDriveArrive, "도착", MockData.lastDriveTo, first = false)
-                }
-                Box(Modifier.padding(vertical = 20.dp).fillMaxWidth().height(1.dp).background(Line))
-                // 수치 3칸 (같은 너비, 칸 사이 세로 구분선)
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                    DriveStat("소요 시간", "${d.minutes}분", Modifier.weight(1f))
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(Line))
-                    DriveStat("거리", "${d.km}km", Modifier.weight(1f).padding(start = 16.dp))
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(Line))
-                    DriveStat("개선 필요", "${MockData.lastDriveIssues}건", Modifier.weight(1f).padding(start = 16.dp))
-                }
-                Spacer(Modifier.weight(1f).heightIn(min = 24.dp))
-                Button(onClick = openReport, modifier = Modifier.align(Alignment.End).height(64.dp),
-                    shape = RoundedCornerShape(ITEM_RADIUS), colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                    contentPadding = PaddingValues(horizontal = 32.dp)) {
-                    Text("리포트 보기", fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-                }
+        }
+        Box(Modifier.matchParentSize().background(Color.White.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.6f), HOME_BAR_SHAPE))
+        Row(Modifier.fillMaxSize().padding(start = 32.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("${MockData.lastDriveDepart} → ${MockData.lastDriveArrive}", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("시흥동 → 삼성동", fontSize = 24.sp, color = Sub)
+            }
+            BarDivider()
+            BarStat("소요", "${d.minutes}분")
+            BarDivider()
+            BarStat("거리", "${d.km}km")
+            BarDivider()
+            BarStat("개선 필요", "${MockData.lastDriveIssues}건")
+            Spacer(Modifier.weight(1f))
+            Button(onClick = openReport, modifier = Modifier.height(60.dp), shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Accent), contentPadding = PaddingValues(horizontal = 28.dp)) {
+                Text("리포트 보기", fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
             }
         }
+    }
+}
 
-        // 이번 주 요약 · 집중 개선 항목 (텍스트 중심, 나란히)
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(GAP)) {
-            Panel(Modifier.weight(1f).fillMaxHeight()) {
-                Label("이번 주 요약")
-                MockData.weekSummary.chunked(2).forEach { pair ->
-                    Row(Modifier.fillMaxWidth().padding(top = 20.dp)) {
-                        pair.forEach { HomeStat(it.label, it.value, Modifier.weight(1f)) }
-                    }
-                }
-            }
-            Panel(Modifier.weight(1f).fillMaxHeight()) {
-                Label("집중 개선 항목")
-                MockData.habits.filter { it.id in focus }.forEach { h ->
-                    Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(h.name, fontSize = BODY, color = Ink)
-                            CategoryTag(h.category)
-                        }
-                        Text("이번 주 ${h.count}회", fontSize = BODY, color = Ink, modifier = Modifier.padding(start = 16.dp))
-                    }
-                }
-            }
-        }
+@Composable
+private fun BarDivider() {
+    Box(Modifier.padding(horizontal = 28.dp).width(1.dp).height(52.dp).background(Line))
+}
 
-        // 음성 코칭 상태: 한 줄 텍스트
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(if (voiceOn) Positive else Sub))
-            Spacer(Modifier.width(12.dp))
-            Text("주행 중 음성 코칭 ${if (voiceOn) "켜짐" else "꺼짐"} · 시동을 걸면 자동으로 기록해요 · 가족 1명 열람 공유 중",
-                fontSize = SMALL, color = Sub)
-        }
+/** 정보 바 수치: 작은 보조 색 라벨 위, 크고 굵은 숫자 아래 */
+@Composable
+private fun BarStat(label: String, value: String) {
+    Column {
+        Text(label, fontSize = 22.sp, color = Sub)
+        Text(value, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
     }
 }
 
@@ -289,42 +323,6 @@ private fun HomeStatusItem(icon: Int, text: String) {
         Icon(painterResource(icon), contentDescription = null, tint = Sub, modifier = Modifier.size(32.dp))
         Spacer(Modifier.width(12.dp))
         Text(text, fontSize = BODY, color = Sub)
-    }
-}
-
-/** 최근 주행 타임라인 한 줄: 점(+ 다음/이전 줄로 이어지는 세로선) · 시간 · 출발/도착 · 지명 */
-@Composable
-private fun TimelineRow(time: String, label: String, place: String, first: Boolean) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.width(16.dp).fillMaxHeight()) {
-            val c = Offset(size.width / 2, size.height / 2)
-            val lineEnd = Offset(c.x, if (first) size.height else 0f)
-            drawLine(Sub.copy(alpha = 0.4f), c, lineEnd, strokeWidth = 2.dp.toPx())
-            drawCircle(Sub, 5.dp.toPx(), c)
-        }
-        Spacer(Modifier.width(16.dp))
-        Text(time, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(vertical = 10.dp))
-        Spacer(Modifier.width(16.dp))
-        Text(label, fontSize = SMALL, color = Sub)
-        Spacer(Modifier.width(12.dp))
-        Text(place, fontSize = SMALL, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-/** 최근 주행 수치 한 칸: 작은 라벨 위, 큰 숫자 아래 */
-@Composable
-private fun DriveStat(label: String, value: String, modifier: Modifier) {
-    Column(modifier) {
-        Text(label, fontSize = SMALL, color = Sub)
-        Text(value, fontSize = 36.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
-    }
-}
-
-@Composable
-private fun HomeStat(label: String, value: String, modifier: Modifier) {
-    Column(modifier) {
-        Text(label, fontSize = SMALL, color = Sub)
-        Text(value, fontSize = 40.sp, fontWeight = FontWeight.SemiBold, color = Ink)
     }
 }
 

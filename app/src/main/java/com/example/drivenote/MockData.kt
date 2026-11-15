@@ -77,12 +77,12 @@ object MockData {
     // 내장 지도 이미지(res/drawable-nodpi/route_map.png): 네이버 Static Map 요청값
     // tools/make_route_map.py가 자동으로 갱신함. Web Mercator, 256px 타일 기준 줌 = level + 1,
     // 이미지 크기 = 요청 크기(w, h) x scale, 이미지 중심 = center
-    const val routeMapCenterLat = 37.464744
+    const val routeMapCenterLat = 37.447427
     const val routeMapCenterLon = 127.094985
     const val routeMapLevel = 11
     const val routeMapScale = 2
     const val routeMapWidth = 2048  // px (= 1024 x 2)
-    const val routeMapHeight = 932 // px (= 466 x 2)
+    const val routeMapHeight = 1412 // px (= 706 x 2)
 
     // 습관이 감지된 구간 (홈 지도에 분류 색으로 강조)
     val lastDriveSegments = listOf(
