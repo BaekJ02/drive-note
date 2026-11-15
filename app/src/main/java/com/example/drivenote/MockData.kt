@@ -41,7 +41,9 @@ object MockData {
     val userName = "김현대"
 
     val lastDrive = DriveSummary("11월 15일 (일) 08:42", "집 → 회사", 34, 14.8)
+    val lastDriveDepart = "08:42"
     val lastDriveArrive = "09:16"
+    val lastDriveIssues = 7 // 최근 주행 1회의 개선 필요 건수 (홈 카드)
     val lastDriveFrom = "성남 수정구 시흥동"
     val lastDriveTo = "강남구 삼성동"
 
@@ -93,7 +95,7 @@ object MockData {
     val weekSummary = listOf(
         WeekStat("주행", "5회"),
         WeekStat("주행 거리", "92km"),
-        WeekStat("개선 필요", "19건"),
+        WeekStat("개선 필요", "31건"),
         WeekStat("지난주 대비", "-6건"),
     )
 

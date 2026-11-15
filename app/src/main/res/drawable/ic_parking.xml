@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 주차 아이콘: 둥근 사각형 안의 P, 선 두께 2, 보조 텍스트 색(#5F6672) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#5F6672" android:strokeWidth="2" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M7,3h10a4,4 0,0 1,4 4v10a4,4 0,0 1,-4 4h-10a4,4 0,0 1,-4 -4v-10a4,4 0,0 1,4 -4z M10,17v-10h3a3,3 0,0 1,0 6h-3" />
+</vector>
