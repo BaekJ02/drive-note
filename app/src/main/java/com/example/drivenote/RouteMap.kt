@@ -4,7 +4,17 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.Log
+import androidx.compose.animation.core.animate
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,25 +63,33 @@ private val Casing = Color.White
  * @param habit 지정하면 그 습관의 구간만 강조하고 발생 지점 마커를 표시 (리포트 상세)
  * @param bottomInset 지도 아래쪽에 다른 요소(떠 있는 정보 바 등)가 겹치는 높이.
  *   경로는 그 위쪽 영역 안에 맞춰 그리고, 저작권 표기도 그 위로 올림 (기본 0 = 기존과 같음)
+ * @param interactive true면 (홈) 드래그·핀치 확대(최대 2.5배)와 '돌아가기' 버튼을 쓰고,
+ *   경로를 구간별 같은 굵기로 이어 그려 색만 바뀌게 함. false면 기존 방식 (리포트)
  */
 @Composable
 fun DriveRouteMap(
     routeColor: Color, modifier: Modifier = Modifier, showAllSegments: Boolean = true, habit: Habit? = null,
-    bottomInset: Dp = 0.dp,
+    bottomInset: Dp = 0.dp, interactive: Boolean = false,
 ) {
     val context = LocalContext.current
     val image = remember { loadRouteMapImage(context) }
     val measurer = rememberTextMeasurer()
+    val view = remember { MapViewport() }
+    val scope = rememberCoroutineScope()
+    val gestures = interactive && image != null // Canvas 대체 지도는 확대 대상 아님
 
     Box(modifier.clipToBounds().background(MapIllustrationBg)) {
-        Canvas(Modifier.fillMaxSize()) {
+        val canvasMod = if (gestures) Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTransformGestures { centroid, pan, zoom, _ -> view.transform(centroid, pan, zoom) }
+        } else Modifier.fillMaxSize()
+        Canvas(canvasMod) {
             val project: (GeoPt) -> Offset = if (image != null) {
-                drawImageProjection(image, bottomInset.toPx())
+                drawImageProjection(image, bottomInset.toPx(), if (gestures) view else null)
             } else {
                 drawMapBase()
                 fitProjection(bottomInset.toPx())
             }
-            drawRoute(project, routeColor, showAllSegments, habit)
+            if (interactive) drawRouteUniform(project, routeColor) else drawRoute(project, routeColor, showAllSegments, habit)
             if (image == null) {
                 // 대체 지도에는 지명이 없으므로 출발·도착 지명을 표시
                 drawPlaceLabel(measurer, "시흥동", project(MockData.lastDriveRoute.first()))
@@ -84,7 +102,58 @@ fun DriveRouteMap(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = bottomInset).background(Color.White.copy(alpha = 0.8f))
                     .padding(horizontal = 6.dp, vertical = 2.dp))
         }
+        if (gestures && view.moved) {
+            MapResetButton(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+                // 처음 위치로 부드럽게 되돌림
+                val (z0, x0, y0) = Triple(view.zoom, view.tx, view.ty)
+                scope.launch {
+                    animate(0f, 1f) { t, _ ->
+                        view.zoom = z0 + (1f - z0) * t; view.tx = x0 * (1 - t); view.ty = y0 * (1 - t)
+                    }
+                }
+            }
+        }
     }
+}
+
+/** 지도 오른쪽 위 '돌아가기' 버튼 (작은 흰 배경 + 그림자). 네이버 SDK 지도와 대체 지도가 같이 씀 */
+@Composable
+fun MapResetButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick, modifier = modifier, shape = RoundedCornerShape(14.dp),
+        color = Color.White, shadowElevation = 6.dp,
+    ) {
+        Text("돌아가기", fontSize = 22.sp, color = Color(0xFF111418),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+    }
+}
+
+/**
+ * 대체 지도 확대·이동 상태. 화면 좌표 = 기본 좌표 * zoom + (tx, ty).
+ * 기본 상태에서 이미지가 차지하는 영역(base*)은 그릴 때 갱신하고, 이동 범위 제한에 씀.
+ */
+private class MapViewport {
+    var zoom by mutableFloatStateOf(1f)
+    var tx by mutableFloatStateOf(0f)
+    var ty by mutableFloatStateOf(0f)
+    val moved get() = zoom > 1.001f || kotlin.math.abs(tx) > 0.5f || kotlin.math.abs(ty) > 0.5f
+    // 기본 상태 이미지 영역(left, top, right, bottom)과 화면 크기 (상태 아님: 그리기 중 갱신)
+    var baseL = 0f; var baseT = 0f; var baseR = 0f; var baseB = 0f
+    var w = 0f; var h = 0f
+
+    fun transform(centroid: Offset, pan: Offset, zoomBy: Float) {
+        val nz = (zoom * zoomBy).coerceIn(1f, MAX_ZOOM)
+        val k = nz / zoom
+        // 손가락 중심점이 같은 지도 위치에 머물도록 확대 + 이동
+        var nx = centroid.x - (centroid.x - tx) * k + pan.x
+        var ny = centroid.y - (centroid.y - ty) * k + pan.y
+        // 이미지가 화면 밖으로 벗어나 빈 영역이 보이지 않게 제한
+        nx = nx.coerceIn(w - baseR * nz, -baseL * nz)
+        ny = ny.coerceIn(h - baseB * nz, -baseT * nz)
+        zoom = nz; tx = nx; ty = ny
+    }
+
+    companion object { const val MAX_ZOOM = 2.5f }
 }
 
 /** 내장 지도 이미지. 없거나 읽기 실패하면 null (→ 대체 지도) */
@@ -130,7 +199,7 @@ private fun imagePixel(g: GeoPt): Offset {
  * 경로 전체가 들어가는 배율과 이미지가 화면을 꽉 채우는 배율 중 큰 쪽을 쓰고,
  * 이미지 밖(빈 영역)이 보이지 않게 위치를 조정한다.
  */
-private fun DrawScope.drawImageProjection(image: ImageBitmap, bottomInset: Float = 0f): (GeoPt) -> Offset {
+private fun DrawScope.drawImageProjection(image: ImageBitmap, bottomInset: Float = 0f, view: MapViewport? = null): (GeoPt) -> Offset {
     val px = MockData.lastDriveRoute.map(::imagePixel)
     val minX = px.minOf { it.x }; val maxX = px.maxOf { it.x }
     val minY = px.minOf { it.y }; val maxY = px.maxOf { it.y }
@@ -144,13 +213,16 @@ private fun DrawScope.drawImageProjection(image: ImageBitmap, bottomInset: Float
     var oy = areaH / 2 - (minY + maxY) / 2 * s
     ox = ox.coerceIn(size.width - image.width * s, 0f)
     oy = oy.coerceIn(size.height - image.height * s, 0f)
+    // 사용자 확대·이동 (없으면 그대로)
+    val z = view?.zoom ?: 1f; val tx = view?.tx ?: 0f; val ty = view?.ty ?: 0f
+    view?.apply { baseL = ox; baseT = oy; baseR = ox + image.width * s; baseB = oy + image.height * s; w = size.width; h = size.height }
     drawImage(
         image,
         srcOffset = IntOffset.Zero, srcSize = IntSize(image.width, image.height),
-        dstOffset = IntOffset(ox.roundToInt(), oy.roundToInt()),
-        dstSize = IntSize((image.width * s).roundToInt(), (image.height * s).roundToInt()),
+        dstOffset = IntOffset((ox * z + tx).roundToInt(), (oy * z + ty).roundToInt()),
+        dstSize = IntSize((image.width * s * z).roundToInt(), (image.height * s * z).roundToInt()),
     )
-    return { g -> val p = imagePixel(g); Offset(ox + p.x * s, oy + p.y * s) }
+    return { g -> val p = imagePixel(g); Offset((ox + p.x * s) * z + tx, (oy + p.y * s) * z + ty) }
 }
 
 /** 대체 지도: 경로 영역을 화면 비율에 맞춰 가운데에 배치 (경도는 위도에 따라 축소) */
@@ -210,6 +282,44 @@ private fun DrawScope.drawRoute(project: (GeoPt) -> Offset, routeColor: Color, s
             drawCircle(habit.category.color, 9.dp.toPx(), p)
         }
     }
+}
+
+/**
+ * 홈 지도용 경로: 전체를 같은 굵기로, 습관 구간만 색을 바꿔 이어 그림 (덧칠 없음).
+ * 흰 테두리를 경로 전체에 한 번 깔고, 그 위에 구간별 색 선을 둥근 끝·둥근 연결로 그림.
+ */
+private fun DrawScope.drawRouteUniform(project: (GeoPt) -> Offset, routeColor: Color) {
+    val route = MockData.lastDriveRoute
+    val pts = route.map(project)
+    fun path(from: Int, to: Int) = Path().apply {
+        pts.subList(from, to + 1).forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) }
+    }
+    fun stroke(w: Float) = Stroke(w.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+    drawPath(path(0, route.lastIndex), Casing, style = stroke(14f)) // 테두리 (선 10 + 양쪽 2)
+    routeParts(routeColor).forEach { (from, to, color) -> drawPath(path(from, to), color, style = stroke(10f)) }
+
+    val start = pts.first(); val end = pts.last()
+    drawCircle(Color.White, 11.dp.toPx(), start)
+    drawCircle(routeColor, 11.dp.toPx(), start, style = Stroke(4.dp.toPx()))
+    drawCircle(Color.White, 13.dp.toPx(), end)
+    drawCircle(routeColor, 9.dp.toPx(), end)
+}
+
+/**
+ * 경로를 습관 구간 기준으로 나눈 조각 목록 (시작 인덱스, 끝 인덱스, 색). 이웃 조각은 끝점을 공유해 끊김 없이 이어짐.
+ * 네이버 SDK 지도(MultipartPathOverlay)와 대체 지도가 같이 씀.
+ */
+fun routeParts(routeColor: Color): List<Triple<Int, Int, Color>> {
+    val last = MockData.lastDriveRoute.lastIndex
+    val parts = mutableListOf<Triple<Int, Int, Color>>()
+    var i = 0
+    MockData.lastDriveSegments.sortedBy { it.from }.forEach { seg ->
+        if (seg.from > i) parts += Triple(i, seg.from, routeColor)
+        parts += Triple(seg.from, seg.to, MockData.habits.first { it.id == seg.habitId }.category.color)
+        i = seg.to
+    }
+    if (i < last) parts += Triple(i, last, routeColor)
+    return parts
 }
 
 /** 꺾인 선 위에서 길이 비율 t(0..1) 지점 */

@@ -1,3 +1,11 @@
+import java.util.Properties
+
+// local.properties(Git 제외)에서 네이버 지도 Client ID를 읽어 매니페스트에 주입. 키 값은 코드에 쓰지 않음
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -17,6 +25,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["NAVER_MAP_KEY_ID"] = localProps.getProperty("NAVER_MAP_KEY_ID", "")
     }
 
     buildTypes {
@@ -40,6 +49,7 @@ android {
 
 dependencies {
     implementation(libs.pleos.vehicle)
+    implementation(libs.naver.map.sdk)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

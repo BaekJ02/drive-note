@@ -16,16 +16,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import android.os.Build
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -222,21 +214,19 @@ private fun HomeScreen(focus: List<Int>, openReport: () -> Unit) {
         }
 
         // 최근 주행: 지도가 카드 전체를 채우고, 정보 바가 지도 위에 떠 있음 (남은 공간을 거의 다 차지)
-        var cardSize by remember { mutableStateOf(IntSize.Zero) }
-        var cardPos by remember { mutableStateOf(Offset.Zero) }
         val barInset = HOME_BAR_HEIGHT + HOME_BAR_MARGIN // 경로·저작권 표기를 바 위쪽에 두기 위한 높이
         Box(
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(RADIUS))
-                .onGloballyPositioned { cardSize = it.size; cardPos = it.positionInRoot() }
         ) {
-            DriveRouteMap(Accent, Modifier.fillMaxSize(), bottomInset = barInset)
+            // 1순위 네이버 지도 SDK, 실패 시 내장 이미지 (드래그·핀치 확대, '돌아가기')
+            HomeRouteMap(Accent, bottomInset = barInset, modifier = Modifier.fillMaxSize())
             Text(
                 "최근 주행", fontSize = SMALL, fontWeight = FontWeight.SemiBold, color = Ink,
                 modifier = Modifier.align(Alignment.TopStart).padding(20.dp)
                     .shadow(4.dp, RoundedCornerShape(12.dp)).background(Color.White, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
-            FloatingDriveBar(cardSize, cardPos, barInset, openReport, Modifier.align(Alignment.BottomCenter))
+            FloatingDriveBar(openReport, Modifier.align(Alignment.BottomCenter))
         }
 
         // 이번 주 한 줄 요약
@@ -255,32 +245,17 @@ private val FOCUS_SHORT_NAMES = mapOf(2 to "브레이크 나눠 밟기", 3 to "�
 
 /**
  * 지도 위에 떠 있는 최근 주행 정보 바.
- * 반투명 흰 배경 + 얇은 흰 테두리 + 그림자. Android 12(API 31) 이상에서는 같은 지도를
- * 바 위치에 맞춰 한 번 더 그려 흐리게 해서 뒤 배경 흐림처럼 보이게 함 (Compose에는 배경 흐림 API가 없음).
+ * 반투명 흰 배경 + 얇은 흰 테두리 + 그림자.
  */
 @Composable
-private fun FloatingDriveBar(cardSize: IntSize, cardPos: Offset, barInset: androidx.compose.ui.unit.Dp, openReport: () -> Unit, modifier: Modifier) {
+private fun FloatingDriveBar(openReport: () -> Unit, modifier: Modifier) {
     val d = MockData.lastDrive
-    var barPos by remember { mutableStateOf(Offset.Zero) }
     Box(
         modifier.padding(start = HOME_BAR_MARGIN, end = HOME_BAR_MARGIN, bottom = HOME_BAR_MARGIN)
             .fillMaxWidth().height(HOME_BAR_HEIGHT)
-            .onGloballyPositioned { barPos = it.positionInRoot() }
             .shadow(28.dp, HOME_BAR_SHAPE, ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.22f))
             .clip(HOME_BAR_SHAPE)
     ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && cardSize != IntSize.Zero) {
-            val dx = (barPos.x - cardPos.x).roundToInt(); val dy = (barPos.y - cardPos.y).roundToInt()
-            DriveRouteMap(
-                Accent,
-                Modifier.matchParentSize().blur(24.dp, BlurredEdgeTreatment.Rectangle).layout { m, c ->
-                    // 카드 크기로 그리고, 바 위치만큼 당겨서 바 뒤에 있는 부분이 보이게 함
-                    val p = m.measure(Constraints.fixed(cardSize.width, cardSize.height))
-                    layout(c.maxWidth, c.maxHeight) { p.place(-dx, -dy) }
-                },
-                bottomInset = barInset,
-            )
-        }
         Box(Modifier.matchParentSize().background(Color.White.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.6f), HOME_BAR_SHAPE))
         Row(Modifier.fillMaxSize().padding(start = 32.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Column {
